@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PySpark Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="spark-mark">*</span><span>PySpark Studio</span></div>
+        <button id="new-chat" class="new-chat" title="Create a chat">+ <span>New chat</span></button>
+        <nav id="chat-list" aria-label="Saved chats"></nav>
+        <div class="sidebar-foot">Sessions persist locally</div>
+      </aside>
+      <section class="workspace">
+        <header class="workspace-head">
+          <div><p class="eyebrow">Code workspace</p><h1 id="chat-title">New PySpark chat</h1></div>
+          <div class="head-actions"><button id="context-toggle" class="secondary-button" type="button" aria-expanded="false">Context</button><a href="/docs" target="_blank" rel="noreferrer">API docs</a></div>
+        </header>
+        <section id="context-panel" class="context-panel" hidden aria-label="Chat context">
+          <form id="context-form">
+            <div class="context-heading"><div><p class="eyebrow">Your context</p><h2>Guide the assistant</h2></div><button class="secondary-button" type="submit">Save context</button></div>
+            <div class="context-grid">
+              <label>Programming language<input id="programming-language" name="programming_language" value="Python" maxlength="120"></label>
+              <label>PySpark or data libraries<input id="libraries" name="libraries" value="PySpark" maxlength="500"></label>
+              <label class="context-wide">Describe your PySpark requirements<textarea id="requirements" name="requirements" rows="3" placeholder="For example: preserve schema, optimize joins, target Databricks."></textarea></label>
+              <label class="context-wide">Relevant code<textarea id="relevant-code" name="relevant_code" rows="6" placeholder="Paste shared functions, schemas, or existing PySpark code."></textarea></label>
+            </div>
+          </form>
+        </section>
+        <section id="messages" class="messages" aria-live="polite">
+          <div class="empty-state"><span class="spark-mark">*</span><h2>Build the Spark job</h2><p>Describe a transformation, upload a file, or paste code to inspect.</p></div>
+        </section>
+        <form id="prompt-form" class="composer">
+          <div class="composer-top">
+            <label class="file-picker" title="Attach a UTF-8 text file"><input id="files" type="file" multiple><span>Attach files</span></label>
+            <span id="file-count" class="file-count"></span>
+            <select id="operation" aria-label="Request type">
+              <option value="generate">Generate</option>
+              <option value="analyze">Analyze</option>
+              <option value="improve">Improve</option>
+              <option value="comment">Comment</option>
+            </select>
+          </div>
+          <textarea id="prompt" required placeholder="Describe what you want to build or paste PySpark code..." rows="4"></textarea>
+          <div class="composer-actions"><span>Files are sent only with this request</span><button id="send" type="submit">Run request <span aria-hidden="true">&#8594;</span></button></div>
+        </form>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

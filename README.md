@@ -1,0 +1,88 @@
+# PySpark Code Generator
+
+Servizio FastAPI per generare, analizzare, migliorare e commentare codice PySpark con un modello LLM OpenAI-compatible. Ogni chat, il relativo contesto e i messaggi sono persistiti in SQLite; il servizio non memorizza i file caricati separatamente, ma ne salva il contenuto nel messaggio della chat.
+
+## Configuration
+
+Create a local configuration file and set the values provided by your LLM vendor:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. `LLM_BASE_URL` must include an optional `/v1` prefix; the service calls `/chat/completions`. `.env` is automatically loaded for local execution and is excluded from the Docker build context.
+
+## Run locally
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn app.main:app --reload
+```
+
+To start the application from this workspace when `.venv` already exists:
+
+```bash
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Aprire `http://localhost:8000` per la UI. La documentazione interattiva Swagger UI e` disponibile su `http://localhost:8000/docs`, ReDoc su `http://localhost:8000/redoc` e lo schema OpenAPI JSON su `http://localhost:8000/openapi.json`.
+
+## Observability
+
+`GET /health` is a liveness endpoint; `GET /ready` is a readiness endpoint that verifies SQLite availability. `GET /metrics` exposes Prometheus metrics in the standard scrape format: HTTP request counts and durations, plus LLM request counts and durations labeled by operation and result.
+
+Per eseguire con il virtual environment locale:
+
+```bash
+.venv/bin/uvicorn app.main:app --reload
+```
+
+## API
+
+1. `POST /api/chats` crea una sessione.
+2. `GET /api/chats/{chat_id}` recupera cronologia e messaggi.
+3. `GET /api/chats/{chat_id}/context` recupera il contesto della chat.
+4. `PUT /api/chats/{chat_id}/context` salva `relevant_code`, `programming_language`, `requirements` e `libraries`. Il contesto e` aggiunto al prompt di sistema per ogni richiesta LLM della chat.
+5. `POST /api/chats/{chat_id}/messages` accetta `multipart/form-data`: `prompt`, `operation` (`generate`, `analyze`, `improve`, `comment`) e opzionalmente uno o piu` campi `files` UTF-8 fino a 2 MB ciascuno.
+
+Esempio per un microservizio:
+
+```bash
+curl -X POST http://localhost:8000/api/chats
+curl -X POST http://localhost:8000/api/chats/CHAT_ID/messages \
+  -F 'prompt=Create a daily aggregation by customer' \
+  -F 'operation=generate' \
+  -F 'files=@job.py'
+```
+
+Per impostare il contesto da un microservizio:
+
+```bash
+curl -X PUT http://localhost:8000/api/chats/CHAT_ID/context \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "programming_language": "PySpark",
+    "libraries": "PySpark, Delta Lake",
+    "requirements": "Target Databricks; preserve the input schema.",
+    "relevant_code": "df = spark.read.format(\"delta\").load(source_path)"
+  }'
+```
+
+## Docker
+
+```bash
+docker build -t pyspark-code-generator .
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -v pyspark-generator-data:/app/data \
+  pyspark-code-generator
+```
+
+## GitHub Container Registry
+
+The [Docker publishing workflow](.github/workflows/docker-publish.yml) builds the image on pull requests and publishes it to `ghcr.io/openbear-it/pyspark-code-generator` after pushes to `main` and version tags such as `v1.0.0`. GitHub repository settings must allow GitHub Actions to write packages.
+
+```bash
+docker pull ghcr.io/openbear-it/pyspark-code-generator:latest
+```
