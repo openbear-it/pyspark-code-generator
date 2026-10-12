@@ -44,7 +44,8 @@ Per eseguire con il virtual environment locale:
 2. `GET /api/chats/{chat_id}` recupera cronologia e messaggi.
 3. `GET /api/chats/{chat_id}/context` recupera il contesto della chat.
 4. `PUT /api/chats/{chat_id}/context` salva `relevant_code`, `programming_language`, `requirements` e `libraries`. Il contesto e` aggiunto al prompt di sistema per ogni richiesta LLM della chat.
-5. `POST /api/chats/{chat_id}/messages` accetta `multipart/form-data`: `prompt`, `operation` (`generate`, `analyze`, `improve`, `comment`) e opzionalmente uno o piu` campi `files` UTF-8 fino a 2 MB ciascuno. La risposta viene inviata come stream di testo e salvata nella chat al termine della generazione.
+5. `POST /api/chats/{chat_id}/context/files` accetta uno o piu` campi multipart `files` UTF-8 fino a 2 MB ciascuno e li salva nel contesto persistente della chat. CSV, TSV, JSON e JSON Lines vengono profilati localmente (schema, tipi dedotti, valori mancanti e campione) e l'analisi viene inclusa nelle successive richieste LLM; le altre sorgenti UTF-8 vengono incluse come testo.
+6. `POST /api/chats/{chat_id}/messages` accetta `multipart/form-data`: `prompt`, `operation` (`generate`, `analyze`, `improve`, `comment`) e opzionalmente uno o piu` campi `files` UTF-8 fino a 2 MB ciascuno. La risposta viene inviata come stream di testo e salvata nella chat al termine della generazione.
 
 Esempio per un microservizio:
 

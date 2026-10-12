@@ -24,9 +24,16 @@ class Message(BaseModel):
     created_at: str
 
 
+class ContextFile(BaseModel):
+    name: str
+    content: str
+    analysis: str = ""
+
+
 class ChatContext(BaseModel):
     relevant_code: str = ""
     selected_code: str = ""
+    files: list[ContextFile] = []
     programming_language: str = "Python"
     requirements: str = ""
     libraries: str = "PySpark"

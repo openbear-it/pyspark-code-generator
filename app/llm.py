@@ -41,6 +41,11 @@ def context_prompt(context: ChatContext) -> str:
     ]
     if context.selected_code:
         parts.append(f"Selected editor code (address this directly):\n```\n{context.selected_code}\n```")
+    for file in context.files:
+        if file.analysis:
+            parts.append(f"Structural analysis for context source {file.name}:\n{file.analysis}")
+        if file.content:
+            parts.append(f"Context file: {file.name}\n```\n{file.content}\n```")
     if context.requirements:
         parts.append(f"Additional requirements:\n{context.requirements}")
     if context.relevant_code:

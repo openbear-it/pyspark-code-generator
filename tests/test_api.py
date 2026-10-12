@@ -12,6 +12,8 @@ def test_health_and_chat_lifecycle(tmp_path, monkeypatch):
         specification = client.get("/openapi.json")
         assert specification.status_code == 200
         assert "/api/chats/{chat_id}/messages" in specification.json()["paths"]
+        assert "/api/chats/{chat_id}/context/files" in specification.json()["paths"]
+        assert "text/plain" in specification.json()["paths"]["/api/chats/{chat_id}/messages"]["post"]["responses"]["200"]["content"]
         assert client.get("/health").json() == {"status": "ok"}
         assert client.get("/ready").json() == {"status": "ready"}
         metrics = client.get("/metrics")
@@ -24,6 +26,7 @@ def test_health_and_chat_lifecycle(tmp_path, monkeypatch):
         context = {
             "relevant_code": "df = spark.read.csv(path)",
             "selected_code": "df = spark.read.csv(path)",
+            "files": [],
             "programming_language": "PySpark",
             "requirements": "Filter invalid records",
             "libraries": "PySpark, Delta Lake",
@@ -33,6 +36,27 @@ def test_health_and_chat_lifecycle(tmp_path, monkeypatch):
         assert loaded.status_code == 200
         assert loaded.json()["messages"] == []
         assert loaded.json()["context"] == context
+
+
+def test_context_files_are_persisted(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "chats.db")
+    with TestClient(app) as client:
+        chat_id = client.post("/api/chats", json={}).json()["id"]
+        response = client.post(
+            f"/api/chats/{chat_id}/context/files",
+            files=[
+                ("files", ("customers.csv", b"id,name,active\n1,Ada,true\n2,,false\n", "text/csv")),
+                ("files", ("orders.json", b'[{"id": 1, "amount": 12.5}]', "application/json")),
+            ],
+        )
+
+        assert response.status_code == 200
+        assert [file["name"] for file in response.json()["files"]] == ["customers.csv", "orders.json"]
+        assert "Columns (3)" in response.json()["files"][0]["analysis"]
+        assert [file["name"] for file in client.get(f"/api/chats/{chat_id}").json()["context"]["files"]] == [
+            "customers.csv",
+            "orders.json",
+        ]
 
 
 def test_chat_response_is_streamed_and_persisted(tmp_path, monkeypatch):

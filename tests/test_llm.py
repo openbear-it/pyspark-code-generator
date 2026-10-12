@@ -1,7 +1,7 @@
 import asyncio
 
 import app.llm as llm
-from app.schemas import ChatContext, ChatDetail
+from app.schemas import ChatContext, ChatDetail, ContextFile
 
 
 def test_request_completion_disables_ssl_verification(monkeypatch):
@@ -54,7 +54,12 @@ def test_system_prompt_requires_response_in_request_language():
 
 
 def test_context_prompt_prioritizes_selected_editor_code():
-    prompt = llm.context_prompt(ChatContext(relevant_code="entire file", selected_code="selected expression"))
+    prompt = llm.context_prompt(ChatContext(
+        relevant_code="entire file",
+        selected_code="selected expression",
+        files=[ContextFile(name="source.csv", content="", analysis="Columns (2): id, name")],
+    ))
 
     assert "Selected editor code (address this directly)" in prompt
     assert "selected expression" in prompt
+    assert "Structural analysis for context source source.csv" in prompt

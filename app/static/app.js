@@ -4,6 +4,9 @@ const messages = document.querySelector("#messages");
 const chatTitle = document.querySelector("#chat-title");
 const form = document.querySelector("#prompt-form");
 const files = document.querySelector("#files");
+const contextFileInput = document.querySelector("#context-files");
+const contextFilesList = document.querySelector("#context-files-list");
+const sourceAnalysis = document.querySelector("#source-analysis");
 const codeEditor = document.querySelector("#code-editor");
 const lineNumbers = document.querySelector("#line-numbers");
 const selectionStatus = document.querySelector("#selection-status");
@@ -93,6 +96,11 @@ function renderContext(context) {
   contextChip.hidden = !hasContext;
   activeContext.hidden = !hasContext;
   if (hasContext) contextChipText.textContent = `${selectionSummary(context.selected_code)} nel contesto`;
+  contextFilesList.innerHTML = context.files.map((file) => `<span class="context-file" title="${escapeHtml(file.name)}"><i data-lucide="file-text"></i><span>${escapeHtml(file.name)}</span><button class="icon-button" type="button" data-file="${escapeHtml(file.name)}" title="Rimuovi ${escapeHtml(file.name)}"><i data-lucide="x"></i></button></span>`).join("");
+  const analyzedFiles = context.files.filter((file) => file.analysis);
+  sourceAnalysis.hidden = !analyzedFiles.length;
+  sourceAnalysis.innerHTML = analyzedFiles.map((file) => `<article class="source-card"><div><i data-lucide="table-properties"></i><strong>${escapeHtml(file.name)}</strong></div><p>${escapeHtml(file.analysis)}</p></article>`).join("");
+  renderIcons();
 }
 
 async function persistContext(changes) {
@@ -138,6 +146,19 @@ selectionButton.addEventListener("click", async () => {
 });
 document.querySelector("#clear-context").addEventListener("click", async () => {
   try { await persistContext({ relevant_code: codeEditor.value, selected_code: "" }); }
+  catch (error) { alert(error.message); }
+});
+contextFileInput.addEventListener("change", async () => {
+  if (!contextFileInput.files.length || !state.chatId) return;
+  const body = new FormData();
+  [...contextFileInput.files].forEach((file) => body.append("files", file));
+  try { state.context = await api(`/api/chats/${state.chatId}/context/files`, { method: "POST", body }); renderContext(state.context); }
+  catch (error) { alert(error.message); } finally { contextFileInput.value = ""; }
+});
+contextFilesList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-file]");
+  if (!button) return;
+  try { await persistContext({ files: state.context.files.filter((file) => file.name !== button.dataset.file) }); }
   catch (error) { alert(error.message); }
 });
 codeEditor.addEventListener("input", () => { renderLineNumbers(); updateSelection(); });

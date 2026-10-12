@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from app.config import DATABASE_PATH
-from app.schemas import Chat, ChatContext, ChatDetail, Message
+from app.schemas import Chat, ChatContext, ChatDetail, ContextFile, Message
 
 
 def current_time() -> str:
@@ -44,6 +44,7 @@ def initialize_database() -> None:
                 chat_id TEXT PRIMARY KEY,
                 relevant_code TEXT NOT NULL DEFAULT '',
                 selected_code TEXT NOT NULL DEFAULT '',
+                context_files TEXT NOT NULL DEFAULT '[]',
                 programming_language TEXT NOT NULL DEFAULT 'Python',
                 requirements TEXT NOT NULL DEFAULT '',
                 libraries TEXT NOT NULL DEFAULT 'PySpark',
@@ -54,6 +55,8 @@ def initialize_database() -> None:
         context_columns = {row["name"] for row in database.execute("PRAGMA table_info(chat_contexts)")}
         if "selected_code" not in context_columns:
             database.execute("ALTER TABLE chat_contexts ADD COLUMN selected_code TEXT NOT NULL DEFAULT ''")
+        if "context_files" not in context_columns:
+            database.execute("ALTER TABLE chat_contexts ADD COLUMN context_files TEXT NOT NULL DEFAULT '[]'")
 
 
 def is_database_available() -> bool:
@@ -89,7 +92,7 @@ def get_chat(chat_id: str) -> ChatDetail:
             "SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at", (chat_id,)
         ).fetchall()
         context = database.execute(
-            "SELECT relevant_code, selected_code, programming_language, requirements, libraries "
+            "SELECT relevant_code, selected_code, context_files, programming_language, requirements, libraries "
             "FROM chat_contexts WHERE chat_id = ?",
             (chat_id,),
         ).fetchone()
@@ -106,7 +109,9 @@ def get_chat(chat_id: str) -> ChatDetail:
     return ChatDetail(
         **dict(chat),
         messages=messages,
-        context=ChatContext(**dict(context)) if context else ChatContext(),
+        context=ChatContext(
+            **{**dict(context), "files": json.loads(context["context_files"])}
+        ) if context else ChatContext(),
     )
 
 
@@ -115,16 +120,25 @@ def update_chat_context(chat_id: str, context: ChatContext) -> ChatContext:
     with connection() as database:
         database.execute(
             """
-            INSERT INTO chat_contexts (chat_id, relevant_code, selected_code, programming_language, requirements, libraries)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO chat_contexts (chat_id, relevant_code, selected_code, context_files, programming_language, requirements, libraries)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 relevant_code = excluded.relevant_code,
                 selected_code = excluded.selected_code,
+                context_files = excluded.context_files,
                 programming_language = excluded.programming_language,
                 requirements = excluded.requirements,
                 libraries = excluded.libraries
             """,
-            (chat_id, *context.model_dump().values()),
+            (
+                chat_id,
+                context.relevant_code,
+                context.selected_code,
+                json.dumps([file.model_dump() for file in context.files]),
+                context.programming_language,
+                context.requirements,
+                context.libraries,
+            ),
         )
     return context
 

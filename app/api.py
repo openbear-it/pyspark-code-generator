@@ -7,6 +7,7 @@ from app.config import MAX_FILE_SIZE
 from app.database import create_chat, get_chat, list_chats, save_message, update_chat_context
 from app.llm import stream_completion
 from app.schemas import Chat, ChatContext, ChatCreate, ChatDetail, Message, Operation
+from app.source_analysis import analyze_source
 
 router = APIRouter(prefix="/api", tags=["chats"])
 
@@ -37,9 +38,39 @@ async def replace_chat_context(chat_id: str, context: ChatContext) -> ChatContex
 
 
 @router.post(
+    "/chats/{chat_id}/context/files",
+    response_model=ChatContext,
+    summary="Analyze and add files to the persistent LLM context",
+    description="Uploads UTF-8 CSV, TSV, JSON, JSON Lines, or text sources up to 2 MB each. Structured files are profiled locally and their schema is included in future LLM requests.",
+)
+async def add_context_files(
+    chat_id: str,
+    files: Annotated[list[UploadFile], File(description="One or more UTF-8 text files to persist as context")],
+) -> ChatContext:
+    chat = get_chat(chat_id)
+    context_files = {file.name: file for file in chat.context.files}
+    for upload in files:
+        content = await upload.read(MAX_FILE_SIZE + 1)
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail=f"{upload.filename} exceeds the 2 MB limit")
+        try:
+            source = analyze_source(upload.filename or "uploaded-file", content)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        context_files[source.name] = source
+    return update_chat_context(chat_id, chat.context.model_copy(update={"files": list(context_files.values())}))
+
+
+@router.post(
     "/chats/{chat_id}/messages",
     summary="Stream a response for a prompt and optional text files",
-    description="Accepts multipart form data. Each uploaded UTF-8 text file is limited to 2 MB.",
+    description="Accepts multipart form data. UTF-8 CSV, TSV, JSON, JSON Lines, and text files up to 2 MB are structurally analyzed before being sent to the LLM.",
+    responses={
+        200: {
+            "description": "Plain-text response streamed as LLM tokens are received.",
+            "content": {"text/plain": {"schema": {"type": "string"}}},
+        }
+    },
 )
 async def add_message(
     chat_id: str,
@@ -55,11 +86,11 @@ async def add_message(
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(status_code=413, detail=f"{upload.filename} exceeds the 2 MB limit")
         try:
-            text = content.decode("utf-8")
-        except UnicodeDecodeError as error:
-            raise HTTPException(status_code=422, detail=f"{upload.filename} is not UTF-8 text") from error
-        attachment_names.append(upload.filename or "uploaded-file")
-        file_context.append(f"\n\n--- File: {upload.filename} ---\n{text}")
+            source = analyze_source(upload.filename or "uploaded-file", content)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        attachment_names.append(source.name)
+        file_context.append(f"\n\n--- File: {source.name} ---\n{source.analysis}\n{source.content}")
 
     save_message(chat_id, "user", prompt + "".join(file_context), attachment_names)
     chat = get_chat(chat_id)
