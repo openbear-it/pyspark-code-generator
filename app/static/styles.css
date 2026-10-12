@@ -41,6 +41,22 @@ h1 { margin: 0; font-size: 20px; letter-spacing: 0; }
 .message-label { margin-bottom: 7px; color: var(--muted); font: 11px "DM Mono", monospace; text-transform: uppercase; }
 .message-content { padding: 16px 18px; border-radius: 6px; background: var(--panel); box-shadow: 0 1px 2px #17212612; line-height: 1.65; white-space: pre-wrap; }
 .message.user .message-content { background: var(--pale-teal); }
+.markdown-content { overflow-wrap: anywhere; white-space: normal; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 { margin: 1.35em 0 .55em; line-height: 1.28; }
+.markdown-content h1 { font-size: 1.4rem; }.markdown-content h2 { font-size: 1.2rem; }.markdown-content h3, .markdown-content h4 { font-size: 1rem; }
+.markdown-content p, .markdown-content ul, .markdown-content ol, .markdown-content pre, .markdown-content blockquote, .markdown-content table { margin: 0 0 1em; }
+.markdown-content ul, .markdown-content ol { padding-left: 1.4em; }
+.markdown-content li + li { margin-top: .25em; }
+.markdown-content code { padding: .12em .32em; border-radius: 3px; background: var(--code); font: .9em "DM Mono", monospace; }
+.markdown-content pre { overflow-x: auto; padding: 14px; border-radius: 5px; background: #172126; color: #f3f7f5; }
+.markdown-content pre code { padding: 0; background: transparent; color: inherit; font-size: .85em; }
+.markdown-content blockquote { padding-left: 12px; border-left: 3px solid var(--orange); color: var(--muted); }
+.markdown-content table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown-content th, .markdown-content td { padding: 7px 9px; border: 1px solid var(--line); text-align: left; }
+.markdown-content th { background: var(--code); }
+.markdown-content a { color: var(--teal); font-weight: 700; }
 .attachment { display: inline-block; margin: 0 6px 8px 0; padding: 4px 7px; border: 1px solid #b7d3c9; border-radius: 4px; color: var(--teal); font: 11px "DM Mono", monospace; }
 .composer { margin: 0 38px 30px; padding: 12px; border: 1px solid #bfc9c4; border-radius: 7px; background: var(--panel); box-shadow: 0 8px 22px #17212610; }
 .composer-top, .composer-actions { display: flex; align-items: center; gap: 9px; }

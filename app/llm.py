@@ -18,7 +18,9 @@ def system_prompt(operation: Operation) -> str:
     return (
         "You are a senior data engineer specializing in Apache Spark and PySpark. "
         f"{goals[operation]} Use idiomatic PySpark DataFrame APIs, account for scale, "
-        "and state assumptions when schema or platform context is missing."
+        "and state assumptions when schema or platform context is missing. "
+        "Respond in the same language as the user's latest request. If it is in Italian, "
+        "write the response in Italian, except for code and established technical terms."
     )
 
 

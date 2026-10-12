@@ -44,3 +44,10 @@ def test_request_completion_disables_ssl_verification(monkeypatch):
 
     assert asyncio.run(llm.request_completion(chat, "generate")) == "Generated code"
     assert captured_client_options == {"timeout": 90, "verify": False}
+
+
+def test_system_prompt_requires_response_in_request_language():
+    prompt = llm.system_prompt("generate")
+
+    assert "same language as the user's latest request" in prompt
+    assert "If it is in Italian" in prompt

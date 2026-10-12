@@ -9,6 +9,11 @@ const contextToggle = document.querySelector("#context-toggle");
 const contextForm = document.querySelector("#context-form");
 
 const escapeHtml = (text) => text.replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+const renderMarkdown = (text) => {
+  if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: true }));
+  return escapeHtml(text).replace(/\n/g, "<br>");
+};
+const renderMessageContent = (message) => message.role === "assistant" ? renderMarkdown(message.content) : escapeHtml(message.content);
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -22,7 +27,7 @@ function renderMessages(chat) {
     <article class="message ${message.role}">
       <div class="message-label">${message.role === "assistant" ? "PySpark assistant" : "You"}</div>
       ${message.attachments.map((name) => `<span class="attachment">${escapeHtml(name)}</span>`).join("")}
-      <div class="message-content">${escapeHtml(message.content)}</div>
+      <div class="message-content ${message.role === "assistant" ? "markdown-content" : ""}">${renderMessageContent(message)}</div>
     </article>`).join("") : `<div class="empty-state"><span class="spark-mark">*</span><h2>Build the Spark job</h2><p>Describe a transformation, upload a file, or paste code to inspect.</p></div>`;
   messages.scrollTop = messages.scrollHeight;
 }
