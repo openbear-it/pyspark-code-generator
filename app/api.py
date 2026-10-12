@@ -5,8 +5,8 @@ from fastapi.responses import StreamingResponse
 
 from app.config import MAX_FILE_SIZE
 from app.database import create_chat, get_chat, list_chats, save_message, update_chat_context
-from app.llm import stream_completion
-from app.schemas import Chat, ChatContext, ChatCreate, ChatDetail, Message, Operation
+from app.llm import request_code_suggestion, stream_completion
+from app.schemas import Chat, ChatContext, ChatCreate, ChatDetail, CodeSuggestion, CodeSuggestionRequest, Message, Operation
 from app.source_analysis import analyze_source
 
 router = APIRouter(prefix="/api", tags=["chats"])
@@ -59,6 +59,17 @@ async def add_context_files(
             raise HTTPException(status_code=422, detail=str(error)) from error
         context_files[source.name] = source
     return update_chat_context(chat_id, chat.context.model_copy(update={"files": list(context_files.values())}))
+
+
+@router.post(
+    "/chats/{chat_id}/suggestions",
+    response_model=CodeSuggestion,
+    summary="Get an inline LLM code suggestion",
+    description="Returns a short code-only completion for the cursor position. The editor calls this endpoint after a pause in typing.",
+)
+async def suggest_code(chat_id: str, payload: CodeSuggestionRequest) -> CodeSuggestion:
+    context = get_chat(chat_id).context
+    return CodeSuggestion(code=await request_code_suggestion(context, payload.code, payload.cursor))
 
 
 @router.post(

@@ -75,6 +75,37 @@ async def request_completion(chat: ChatDetail, operation: Operation) -> str:
         LLM_REQUEST_DURATION.labels(operation).observe(perf_counter() - started_at)
 
 
+async def request_code_suggestion(context: ChatContext, code: str, cursor: int) -> str:
+    validate_llm_configuration()
+    before_cursor = code[:cursor]
+    after_cursor = code[cursor:]
+    prompt = (
+        "Suggest the shortest useful continuation at the cursor for the current PySpark code. "
+        "Return only code to insert, with no Markdown fences, explanation, or repeated existing lines. "
+        "Limit the suggestion to 12 lines.\n\n"
+        f"{context_prompt(context)}\n\n"
+        f"Code before cursor:\n```\n{before_cursor}\n```\n\n"
+        f"Code after cursor:\n```\n{after_cursor}\n```"
+    )
+    endpoint = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
+    payload = {"model": config.LLM_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+    started_at = perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=30, verify=config.LLM_VERIFY_SSL) as client:
+            response = await client.post(endpoint, headers={"Authorization": f"Bearer {config.LLM_API_KEY}"}, json=payload)
+            response.raise_for_status()
+            suggestion = response.json()["choices"][0]["message"]["content"].strip()
+        if suggestion.startswith("```"):
+            suggestion = "\n".join(suggestion.splitlines()[1:-1]).strip()
+        LLM_REQUESTS.labels("suggest", "success").inc()
+        return suggestion
+    except (httpx.HTTPError, KeyError, IndexError, TypeError) as error:
+        LLM_REQUESTS.labels("suggest", "error").inc()
+        raise HTTPException(status_code=502, detail=f"LLM suggestion failed: {error}") from error
+    finally:
+        LLM_REQUEST_DURATION.labels("suggest").observe(perf_counter() - started_at)
+
+
 async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIterator[str]:
     validate_llm_configuration()
 

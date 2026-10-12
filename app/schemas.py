@@ -1,12 +1,21 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 Operation = Literal["generate", "analyze", "improve", "comment"]
 
 
 class ChatCreate(BaseModel):
     title: Optional[str] = None
+
+
+class CodeSuggestionRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=2 * 1024 * 1024)
+    cursor: int = Field(ge=0)
+
+
+class CodeSuggestion(BaseModel):
+    code: str
 
 
 class Chat(BaseModel):

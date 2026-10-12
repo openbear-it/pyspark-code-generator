@@ -13,6 +13,7 @@ def test_health_and_chat_lifecycle(tmp_path, monkeypatch):
         assert specification.status_code == 200
         assert "/api/chats/{chat_id}/messages" in specification.json()["paths"]
         assert "/api/chats/{chat_id}/context/files" in specification.json()["paths"]
+        assert "/api/chats/{chat_id}/suggestions" in specification.json()["paths"]
         assert "text/plain" in specification.json()["paths"]["/api/chats/{chat_id}/messages"]["post"]["responses"]["200"]["content"]
         assert client.get("/health").json() == {"status": "ok"}
         assert client.get("/ready").json() == {"status": "ready"}
@@ -57,6 +58,25 @@ def test_context_files_are_persisted(tmp_path, monkeypatch):
             "customers.csv",
             "orders.json",
         ]
+
+
+def test_code_suggestion_uses_chat_context(tmp_path, monkeypatch):
+    async def fake_suggestion(context, code, cursor):
+        assert code == "result = df"
+        assert cursor == len(code)
+        return ".select('id')"
+
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "chats.db")
+    monkeypatch.setattr(api, "request_code_suggestion", fake_suggestion)
+    with TestClient(app) as client:
+        chat_id = client.post("/api/chats", json={}).json()["id"]
+        response = client.post(
+            f"/api/chats/{chat_id}/suggestions",
+            json={"code": "result = df", "cursor": 11},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"code": ".select('id')"}
 
 
 def test_chat_response_is_streamed_and_persisted(tmp_path, monkeypatch):
