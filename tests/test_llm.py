@@ -1,6 +1,9 @@
 import asyncio
 import json
 
+import pytest
+from fastapi import HTTPException
+
 import app.llm as llm
 from app.schemas import ChatContext, ChatDetail, ContextFile
 
@@ -85,6 +88,97 @@ def test_stream_completion_uses_configured_output_token_budget(monkeypatch):
     assert asyncio.run(collect_stream()) == ["Done"]
     assert captured_payload["max_tokens"] == 6144
     assert captured_payload["stream"] is True
+
+
+def test_stream_completion_continues_after_output_limit(monkeypatch):
+    captured_payloads = []
+    segments = [("first part", "length"), (" second part", "stop")]
+
+    async def handler(request):
+        payload = json.loads(request.content)
+        captured_payloads.append(payload)
+        content, finish_reason = segments[len(captured_payloads) - 1]
+        events = [
+            {"choices": [{"delta": {"content": content}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": finish_reason}]},
+        ]
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        body += "data: [DONE]\n\n"
+        return llm.httpx.Response(200, content=body.encode())
+
+    original_async_client = llm.httpx.AsyncClient
+    monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
+    monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(llm.config, "LLM_MAX_OUTPUT_TOKENS", 6144)
+    monkeypatch.setattr(llm.config, "LLM_MAX_CONTINUATIONS", 2, raising=False)
+    monkeypatch.setattr(
+        llm.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_async_client(transport=llm.httpx.MockTransport(handler), **kwargs),
+    )
+    chat = ChatDetail(
+        id="chat-id",
+        title="Test",
+        created_at="now",
+        updated_at="now",
+        messages=[],
+        context=ChatContext(),
+    )
+
+    async def collect_stream():
+        return "".join([chunk async for chunk in llm.stream_completion(chat, "generate")])
+
+    assert asyncio.run(collect_stream()) == "first part second part"
+    assert len(captured_payloads) == 2
+    continuation_messages = captured_payloads[1]["messages"]
+    assert continuation_messages[-2] == {"role": "assistant", "content": "first part"}
+    assert continuation_messages[-1]["role"] == "user"
+    assert "Continue exactly" in continuation_messages[-1]["content"]
+
+
+def test_stream_completion_stops_after_max_continuations(monkeypatch):
+    request_count = 0
+
+    async def handler(request):
+        nonlocal request_count
+        request_count += 1
+        events = [
+            {"choices": [{"delta": {"content": "part"}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        ]
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        body += "data: [DONE]\n\n"
+        return llm.httpx.Response(200, content=body.encode())
+
+    original_async_client = llm.httpx.AsyncClient
+    monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
+    monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(llm.config, "LLM_MAX_OUTPUT_TOKENS", 6144)
+    monkeypatch.setattr(llm.config, "LLM_MAX_CONTINUATIONS", 1)
+    monkeypatch.setattr(
+        llm.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_async_client(transport=llm.httpx.MockTransport(handler), **kwargs),
+    )
+    chat = ChatDetail(
+        id="chat-id",
+        title="Test",
+        created_at="now",
+        updated_at="now",
+        messages=[],
+        context=ChatContext(),
+    )
+
+    async def collect_stream():
+        return [chunk async for chunk in llm.stream_completion(chat, "generate")]
+
+    with pytest.raises(HTTPException, match="remained truncated") as error:
+        asyncio.run(collect_stream())
+
+    assert error.value.status_code == 502
+    assert request_count == 2
 
 
 def test_system_prompt_requires_response_in_request_language():

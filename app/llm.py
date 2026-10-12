@@ -125,30 +125,67 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
         "stream": True,
     }
     started_at = perf_counter()
-    stream_finished = False
+    continuation_count = 0
+    max_continuations = max(0, config.LLM_MAX_CONTINUATIONS)
     try:
         async with httpx.AsyncClient(timeout=90, verify=config.LLM_VERIFY_SSL) as client:
-            async with client.stream("POST", endpoint, headers={"Authorization": f"Bearer {config.LLM_API_KEY}"}, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    event = line.removeprefix("data:").strip()
-                    if event == "[DONE]":
-                        stream_finished = True
-                        break
-                    choice = json.loads(event)["choices"][0]
-                    content = choice.get("delta", {}).get("content")
-                    if content:
-                        yield content
-                    finish_reason = choice.get("finish_reason")
-                    if finish_reason is not None:
-                        stream_finished = True
-                        if finish_reason == "length":
-                            LLM_REQUESTS.labels(operation, "error").inc()
-                            raise HTTPException(status_code=502, detail="LLM response was truncated at its output length limit")
-        if not stream_finished:
-            raise HTTPException(status_code=502, detail="LLM stream ended before completion")
+            while True:
+                stream_finished = False
+                finish_reason = None
+                continuation_chunks: list[str] = []
+                async with client.stream(
+                    "POST",
+                    endpoint,
+                    headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        event = line.removeprefix("data:").strip()
+                        if event == "[DONE]":
+                            stream_finished = True
+                            break
+                        choice = json.loads(event)["choices"][0]
+                        content = choice.get("delta", {}).get("content")
+                        if content:
+                            continuation_chunks.append(content)
+                            yield content
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            stream_finished = True
+                            break
+                if not stream_finished:
+                    raise HTTPException(status_code=502, detail="LLM stream ended before completion")
+                if finish_reason != "length":
+                    break
+                if continuation_count >= max_continuations:
+                    LLM_REQUESTS.labels(operation, "error").inc()
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "LLM response remained truncated after "
+                            f"{continuation_count} continuation attempts"
+                        ),
+                    )
+
+                continuation_count += 1
+                messages.extend(
+                    [
+                        {"role": "assistant", "content": "".join(continuation_chunks)},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Continue exactly from where the previous response ended. "
+                                "Do not repeat or summarize previous content or add an introduction. "
+                                "Continue the same code or response, and close any open Markdown code "
+                                "fence only when the code is complete."
+                            ),
+                        },
+                    ]
+                )
+                payload["messages"] = messages
         LLM_REQUESTS.labels(operation, "success").inc()
     except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
         LLM_REQUESTS.labels(operation, "error").inc()
