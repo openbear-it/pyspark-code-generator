@@ -183,9 +183,10 @@ form.addEventListener("submit", async (event) => {
       renderMessages(chat);
       streamingContent = addStreamingMessage();
     }, (chunk) => {
+      const followStream = messages.scrollHeight - messages.clientHeight - messages.scrollTop < 48;
       answer += chunk;
       streamingContent.innerHTML = renderMarkdown(answer);
-      messages.scrollTop = messages.scrollHeight;
+      if (followStream) messages.scrollTop = messages.scrollHeight;
     });
     form.reset(); document.querySelector("#file-count").textContent = ""; await loadChat(state.chatId);
   } catch (error) { alert(error.message); } finally { button.disabled = false; }
