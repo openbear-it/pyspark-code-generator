@@ -3,6 +3,7 @@ const chatList = document.querySelector("#chat-list");
 const messages = document.querySelector("#messages");
 const chatTitle = document.querySelector("#chat-title");
 const form = document.querySelector("#prompt-form");
+const promptInput = document.querySelector("#prompt");
 const files = document.querySelector("#files");
 const contextFileInput = document.querySelector("#context-files");
 const contextFilesList = document.querySelector("#context-files-list");
@@ -134,6 +135,16 @@ async function createChat() {
 
 document.querySelector("#new-chat").addEventListener("click", createChat);
 document.querySelector("#refresh-chats").addEventListener("click", refreshChats);
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  if (event.ctrlKey) {
+    promptInput.setRangeText("\n", promptInput.selectionStart, promptInput.selectionEnd, "end");
+    promptInput.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+  form.requestSubmit();
+});
 document.querySelector("#save-code").addEventListener("click", async () => {
   if (!state.chatId) return;
   try { await persistContext({ relevant_code: codeEditor.value }); } catch (error) { alert(error.message); }
@@ -165,6 +176,22 @@ codeEditor.addEventListener("input", () => { renderLineNumbers(); updateSelectio
 codeEditor.addEventListener("select", updateSelection);
 codeEditor.addEventListener("click", updateSelection);
 codeEditor.addEventListener("keyup", updateSelection);
+codeEditor.addEventListener("keydown", async (event) => {
+  if (!event.ctrlKey || event.code !== "Space") return;
+  event.preventDefault();
+  if (!state.chatId || !codeEditor.value.trim()) return;
+  const cursor = codeEditor.selectionStart;
+  try {
+    const suggestion = await api(`/api/chats/${state.chatId}/suggestions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: codeEditor.value, cursor }),
+    });
+    if (!suggestion.code) return;
+    codeEditor.setRangeText(suggestion.code, cursor, cursor, "end");
+    codeEditor.dispatchEvent(new Event("input", { bubbles: true }));
+  } catch (error) { alert(error.message); }
+});
 codeEditor.addEventListener("scroll", () => { lineNumbers.scrollTop = codeEditor.scrollTop; });
 files.addEventListener("change", () => { document.querySelector("#file-count").textContent = files.files.length ? `${files.files.length} file` : ""; });
 
@@ -188,7 +215,8 @@ form.addEventListener("submit", async (event) => {
       streamingContent.innerHTML = renderMarkdown(answer);
       if (followStream) messages.scrollTop = messages.scrollHeight;
     });
-    form.reset(); document.querySelector("#file-count").textContent = ""; await loadChat(state.chatId);
+    streamingContent.closest(".message")?.querySelector(".streaming-dot")?.remove();
+    form.reset(); document.querySelector("#file-count").textContent = ""; await refreshChats();
   } catch (error) { alert(error.message); } finally { button.disabled = false; }
 });
 

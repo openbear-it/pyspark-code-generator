@@ -80,7 +80,10 @@ def test_code_suggestion_uses_chat_context(tmp_path, monkeypatch):
 
 
 def test_chat_response_is_streamed_and_persisted(tmp_path, monkeypatch):
+    llm_user_content = []
+
     async def fake_stream_completion(chat, operation):
+        llm_user_content.append(chat.messages[-1].content)
         yield "Ciao "
         yield "**mondo**"
 
@@ -91,11 +94,12 @@ def test_chat_response_is_streamed_and_persisted(tmp_path, monkeypatch):
         response = client.post(
             f"/api/chats/{chat_id}/messages",
             data={"prompt": "Rispondi in italiano", "operation": "generate"},
+            files=[("files", ("customers.csv", b"id,name\n1,Ada\n", "text/csv"))],
         )
 
         assert response.status_code == 200
         assert response.text == "Ciao **mondo**"
-        assert [message["content"] for message in client.get(f"/api/chats/{chat_id}").json()["messages"]] == [
-            "Rispondi in italiano",
-            "Ciao **mondo**",
-        ]
+        assert '"name": "Ada"' in llm_user_content[0]
+        messages = client.get(f"/api/chats/{chat_id}").json()["messages"]
+        assert [message["content"] for message in messages] == ["Rispondi in italiano", "Ciao **mondo**"]
+        assert messages[0]["attachments"] == ["customers.csv"]

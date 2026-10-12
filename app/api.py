@@ -103,8 +103,11 @@ async def add_message(
         attachment_names.append(source.name)
         file_context.append(f"\n\n--- File: {source.name} ---\n{source.analysis}\n{source.content}")
 
-    save_message(chat_id, "user", prompt + "".join(file_context), attachment_names)
+    save_message(chat_id, "user", prompt, attachment_names)
     chat = get_chat(chat_id)
+    if file_context:
+        llm_message = chat.messages[-1].model_copy(update={"content": prompt + "".join(file_context)})
+        chat = chat.model_copy(update={"messages": [*chat.messages[:-1], llm_message]})
 
     async def generate_response():
         chunks: list[str] = []
