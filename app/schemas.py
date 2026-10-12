@@ -26,6 +26,7 @@ class Message(BaseModel):
 
 class ChatContext(BaseModel):
     relevant_code: str = ""
+    selected_code: str = ""
     programming_language: str = "Python"
     requirements: str = ""
     libraries: str = "PySpark"

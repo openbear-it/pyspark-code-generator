@@ -13,45 +13,36 @@
     <main class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="spark-mark">*</span><span>PySpark Studio</span></div>
-        <button id="new-chat" class="new-chat" title="Create a chat">+ <span>New chat</span></button>
-        <nav id="chat-list" aria-label="Saved chats"></nav>
-        <div class="sidebar-foot">Sessions persist locally</div>
+        <button id="new-chat" class="new-chat" title="Nuova chat"><i data-lucide="square-pen"></i><span>Nuova chat</span></button>
+        <div class="sidebar-section"><span>CONVERSAZIONI</span><button id="refresh-chats" class="icon-button" type="button" title="Aggiorna conversazioni"><i data-lucide="refresh-cw"></i></button></div>
+        <nav id="chat-list" aria-label="Chat salvate"></nav>
+        <div class="sidebar-foot"><i data-lucide="database"></i> Sessioni salvate localmente</div>
       </aside>
-      <section class="workspace">
-        <header class="workspace-head">
-          <div><p class="eyebrow">Code workspace</p><h1 id="chat-title">New PySpark chat</h1></div>
-          <div class="head-actions"><button id="context-toggle" class="secondary-button" type="button" aria-expanded="false">Context</button><a href="/docs" target="_blank" rel="noreferrer">API docs</a></div>
+      <section class="workbench">
+        <header class="topbar">
+          <div class="breadcrumbs"><i data-lucide="folder-code"></i><span>workspace</span><i data-lucide="chevron-right"></i><strong id="chat-title">Nuova chat</strong></div>
+          <a href="/docs" target="_blank" rel="noreferrer"><i data-lucide="book-open"></i> API</a>
         </header>
-        <section id="context-panel" class="context-panel" hidden aria-label="Chat context">
-          <form id="context-form">
-            <div class="context-heading"><div><p class="eyebrow">Your context</p><h2>Guide the assistant</h2></div><button class="secondary-button" type="submit">Save context</button></div>
-            <div class="context-grid">
-              <label>Programming language<input id="programming-language" name="programming_language" value="Python" maxlength="120"></label>
-              <label>PySpark or data libraries<input id="libraries" name="libraries" value="PySpark" maxlength="500"></label>
-              <label class="context-wide">Describe your PySpark requirements<textarea id="requirements" name="requirements" rows="3" placeholder="For example: preserve schema, optimize joins, target Databricks."></textarea></label>
-              <label class="context-wide">Relevant code<textarea id="relevant-code" name="relevant_code" rows="6" placeholder="Paste shared functions, schemas, or existing PySpark code."></textarea></label>
-            </div>
-          </form>
-        </section>
-        <section id="messages" class="messages" aria-live="polite">
-          <div class="empty-state"><span class="spark-mark">*</span><h2>Build the Spark job</h2><p>Describe a transformation, upload a file, or paste code to inspect.</p></div>
-        </section>
-        <form id="prompt-form" class="composer">
-          <div class="composer-top">
-            <label class="file-picker" title="Attach a UTF-8 text file"><input id="files" type="file" multiple><span>Attach files</span></label>
-            <span id="file-count" class="file-count"></span>
-            <select id="operation" aria-label="Request type">
-              <option value="generate">Generate</option>
-              <option value="analyze">Analyze</option>
-              <option value="improve">Improve</option>
-              <option value="comment">Comment</option>
-            </select>
-          </div>
-          <textarea id="prompt" required placeholder="Describe what you want to build or paste PySpark code..." rows="4"></textarea>
-          <div class="composer-actions"><span>Files are sent only with this request</span><button id="send" type="submit">Run request <span aria-hidden="true">&#8594;</span></button></div>
-        </form>
+        <div class="panes">
+          <section class="editor-pane" aria-label="Editor del codice">
+            <header class="pane-head"><div class="file-tab"><i data-lucide="file-code-2"></i><span>job.py</span><i class="dirty-dot" aria-hidden="true"></i></div><div class="pane-actions"><button id="save-code" class="icon-button" type="button" title="Salva il codice nel contesto"><i data-lucide="save"></i></button></div></header>
+            <div class="editor-meta"><span><i data-lucide="braces"></i> PYSPARK</span><span id="selection-status">Nessuna selezione</span></div>
+            <div class="editor-wrap"><pre id="line-numbers" aria-hidden="true">1</pre><textarea id="code-editor" spellcheck="false" aria-label="Codice PySpark" placeholder="# Incolla o scrivi qui il tuo codice PySpark\nfrom pyspark.sql import functions as F\n\nresult = df.groupBy(\"customer_id\").agg(\n    F.sum(\"amount\").alias(\"total_amount\")\n)"></textarea></div>
+            <footer class="editor-foot"><div id="context-chip" class="context-chip" hidden><i data-lucide="quote"></i><span id="context-chip-text"></span><button id="clear-context" class="icon-button" type="button" title="Rimuovi selezione dal contesto"><i data-lucide="x"></i></button></div><span id="editor-position">Ln 1, Col 1</span><button id="use-selection" class="selection-button" type="button" disabled><i data-lucide="message-square-quote"></i> Usa selezione come contesto</button></footer>
+          </section>
+          <section class="conversation-pane" aria-label="Conversazione con assistente">
+            <header class="pane-head conversation-head"><div><span class="assistant-status"><i data-lucide="sparkles"></i> PYSPARK ASSISTANT</span><p>Chiedi, rivedi e migliora il tuo codice</p></div><span class="online"><i data-lucide="circle"></i> Pronto</span></header>
+            <section id="messages" class="messages" aria-live="polite"><div class="empty-state"><i data-lucide="messages-square"></i><h2>Inizia dal codice</h2><p>Seleziona una parte dell'editor per usarla come contesto, poi poni una domanda.</p></div></section>
+            <form id="prompt-form" class="composer">
+              <div id="active-context" class="active-context" hidden><i data-lucide="quote"></i><span>La selezione dell'editor sarà usata come contesto</span></div>
+              <textarea id="prompt" required placeholder="Fai una domanda sul tuo codice..." rows="3"></textarea>
+              <div class="composer-actions"><div class="composer-tools"><label class="icon-button file-picker" title="Allega file di testo"><input id="files" type="file" multiple><i data-lucide="paperclip"></i></label><span id="file-count" class="file-count"></span><select id="operation" aria-label="Tipo di richiesta"><option value="generate">Genera</option><option value="analyze">Analizza</option><option value="improve">Migliora</option><option value="comment">Commenta</option></select></div><button id="send" type="submit" title="Invia richiesta"><i data-lucide="send-horizontal"></i><span>Invia</span></button></div>
+            </form>
+          </section>
+        </div>
       </section>
     </main>
+    <script src="https://unpkg.com/lucide@0.468.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
     <script src="/static/app.js"></script>

@@ -1,10 +1,11 @@
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.config import MAX_FILE_SIZE
 from app.database import create_chat, get_chat, list_chats, save_message, update_chat_context
-from app.llm import request_completion
+from app.llm import stream_completion
 from app.schemas import Chat, ChatContext, ChatCreate, ChatDetail, Message, Operation
 
 router = APIRouter(prefix="/api", tags=["chats"])
@@ -37,8 +38,7 @@ async def replace_chat_context(chat_id: str, context: ChatContext) -> ChatContex
 
 @router.post(
     "/chats/{chat_id}/messages",
-    response_model=Message,
-    summary="Send a prompt and optional text files to the LLM",
+    summary="Stream a response for a prompt and optional text files",
     description="Accepts multipart form data. Each uploaded UTF-8 text file is limited to 2 MB.",
 )
 async def add_message(
@@ -62,5 +62,13 @@ async def add_message(
         file_context.append(f"\n\n--- File: {upload.filename} ---\n{text}")
 
     save_message(chat_id, "user", prompt + "".join(file_context), attachment_names)
-    answer = await request_completion(get_chat(chat_id), operation)
-    return save_message(chat_id, "assistant", answer, [])
+    chat = get_chat(chat_id)
+
+    async def generate_response():
+        chunks: list[str] = []
+        async for chunk in stream_completion(chat, operation):
+            chunks.append(chunk)
+            yield chunk
+        save_message(chat_id, "assistant", "".join(chunks), [])
+
+    return StreamingResponse(generate_response(), media_type="text/plain")

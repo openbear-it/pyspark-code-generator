@@ -1,3 +1,5 @@
+import json
+from collections.abc import AsyncIterator
 from time import perf_counter
 
 import httpx
@@ -6,6 +8,14 @@ from fastapi import HTTPException
 from app import config
 from app.metrics import LLM_REQUEST_DURATION, LLM_REQUESTS
 from app.schemas import ChatContext, ChatDetail, Operation
+
+
+def validate_llm_configuration() -> None:
+    if not all((config.LLM_BASE_URL, config.LLM_API_KEY, config.LLM_MODEL)):
+        raise HTTPException(
+            status_code=503,
+            detail="LLM_BASE_URL, LLM_API_KEY and LLM_MODEL must be configured",
+        )
 
 
 def system_prompt(operation: Operation) -> str:
@@ -29,6 +39,8 @@ def context_prompt(context: ChatContext) -> str:
         f"Programming language: {context.programming_language}.",
         f"PySpark or data libraries: {context.libraries}.",
     ]
+    if context.selected_code:
+        parts.append(f"Selected editor code (address this directly):\n```\n{context.selected_code}\n```")
     if context.requirements:
         parts.append(f"Additional requirements:\n{context.requirements}")
     if context.relevant_code:
@@ -37,11 +49,7 @@ def context_prompt(context: ChatContext) -> str:
 
 
 async def request_completion(chat: ChatDetail, operation: Operation) -> str:
-    if not all((config.LLM_BASE_URL, config.LLM_API_KEY, config.LLM_MODEL)):
-        raise HTTPException(
-            status_code=503,
-            detail="LLM_BASE_URL, LLM_API_KEY and LLM_MODEL must be configured",
-        )
+    validate_llm_configuration()
 
     messages = [{"role": "system", "content": f"{system_prompt(operation)}\n\n{context_prompt(chat.context)}"}]
     messages.extend({"role": message.role, "content": message.content} for message in chat.messages)
@@ -56,6 +64,35 @@ async def request_completion(chat: ChatDetail, operation: Operation) -> str:
         LLM_REQUESTS.labels(operation, "success").inc()
         return content
     except (httpx.HTTPError, KeyError, IndexError, TypeError) as error:
+        LLM_REQUESTS.labels(operation, "error").inc()
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {error}") from error
+    finally:
+        LLM_REQUEST_DURATION.labels(operation).observe(perf_counter() - started_at)
+
+
+async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIterator[str]:
+    validate_llm_configuration()
+
+    messages = [{"role": "system", "content": f"{system_prompt(operation)}\n\n{context_prompt(chat.context)}"}]
+    messages.extend({"role": message.role, "content": message.content} for message in chat.messages)
+    endpoint = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
+    payload = {"model": config.LLM_MODEL, "messages": messages, "temperature": 0.2, "stream": True}
+    started_at = perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=90, verify=config.LLM_VERIFY_SSL) as client:
+            async with client.stream("POST", endpoint, headers={"Authorization": f"Bearer {config.LLM_API_KEY}"}, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    event = line.removeprefix("data:").strip()
+                    if event == "[DONE]":
+                        break
+                    content = json.loads(event)["choices"][0].get("delta", {}).get("content")
+                    if content:
+                        yield content
+        LLM_REQUESTS.labels(operation, "success").inc()
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
         LLM_REQUESTS.labels(operation, "error").inc()
         raise HTTPException(status_code=502, detail=f"LLM request failed: {error}") from error
     finally:

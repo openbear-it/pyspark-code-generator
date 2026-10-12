@@ -51,3 +51,10 @@ def test_system_prompt_requires_response_in_request_language():
 
     assert "same language as the user's latest request" in prompt
     assert "If it is in Italian" in prompt
+
+
+def test_context_prompt_prioritizes_selected_editor_code():
+    prompt = llm.context_prompt(ChatContext(relevant_code="entire file", selected_code="selected expression"))
+
+    assert "Selected editor code (address this directly)" in prompt
+    assert "selected expression" in prompt
