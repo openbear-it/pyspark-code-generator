@@ -1,6 +1,6 @@
 # PySpark Code Generator
 
-Servizio FastAPI per generare, analizzare, migliorare e commentare codice PySpark con un modello LLM OpenAI-compatible. Ogni chat, il relativo contesto e i messaggi sono persistiti in SQLite; il servizio non memorizza i file caricati separatamente, ma ne salva il contenuto nel messaggio della chat.
+Servizio FastAPI per generare, analizzare, migliorare e commentare codice PySpark con un modello LLM OpenAI-compatible. Ogni chat, il relativo contesto e i messaggi sono persistiti in SQLite. I file allegati a un singolo prompt vengono passati al modello senza inserirne il contenuto nel testo della cronologia; i file aggiunti al contesto persistente vengono salvati con quel contesto.
 
 ## Configuration
 
@@ -28,6 +28,12 @@ To start the application from this workspace when `.venv` already exists:
 
 Aprire `http://localhost:8000` per la UI. La documentazione interattiva Swagger UI e` disponibile su `http://localhost:8000/docs`, ReDoc su `http://localhost:8000/redoc` e lo schema OpenAPI JSON su `http://localhost:8000/openapi.json`.
 
+## Browser privacy
+
+Ogni browser riceve un cookie anonimo `HttpOnly` e vede solo le chat create con quel cookie. Le schede dello stesso profilo browser condividono le chat; profili o browser distinti ricevono spazi separati. Non ci sono account: cancellare il cookie crea un nuovo spazio e non consente di recuperare quello precedente. Le chat create prima dell'introduzione dell'isolamento restano nel database, ma non vengono assegnate automaticamente né mostrate.
+
+I client API devono conservare e reinviare il cookie `pyspark_browser_session` per mantenere lo stesso spazio tra le richieste.
+
 ## Observability
 
 `GET /health` is a liveness endpoint; `GET /ready` is a readiness endpoint that verifies SQLite availability. `GET /metrics` exposes Prometheus metrics in the standard scrape format: HTTP request counts and durations, plus LLM request counts and durations labeled by operation and result.
@@ -50,8 +56,9 @@ Per eseguire con il virtual environment locale:
 Esempio per un microservizio:
 
 ```bash
-curl -X POST http://localhost:8000/api/chats
-curl -X POST http://localhost:8000/api/chats/CHAT_ID/messages \
+curl -c cookies.txt -b cookies.txt -X POST http://localhost:8000/api/chats \
+  -H 'Content-Type: application/json' -d '{}'
+curl -b cookies.txt -X POST http://localhost:8000/api/chats/CHAT_ID/messages \
   -F 'prompt=Create a daily aggregation by customer' \
   -F 'operation=generate' \
   -F 'files=@job.py'
@@ -61,6 +68,7 @@ Per impostare il contesto da un microservizio:
 
 ```bash
 curl -X PUT http://localhost:8000/api/chats/CHAT_ID/context \
+  -b cookies.txt \
   -H 'Content-Type: application/json' \
   -d '{
     "programming_language": "PySpark",

@@ -1,3 +1,5 @@
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 import app.api as api
@@ -37,6 +39,68 @@ def test_health_and_chat_lifecycle(tmp_path, monkeypatch):
         assert loaded.status_code == 200
         assert loaded.json()["messages"] == []
         assert loaded.json()["context"] == context
+
+
+def test_browser_sessions_isolate_chat_access(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "chats.db")
+    context = {
+        "relevant_code": "",
+        "selected_code": "",
+        "files": [],
+        "programming_language": "Python",
+        "requirements": "",
+        "libraries": "PySpark",
+    }
+    with TestClient(app) as first_browser, TestClient(app) as second_browser:
+        first_list = first_browser.get("/api/chats")
+        second_list = second_browser.get("/api/chats")
+        first_cookie = first_browser.cookies.get("pyspark_browser_session")
+        second_cookie = second_browser.cookies.get("pyspark_browser_session")
+
+        assert first_cookie and second_cookie and first_cookie != second_cookie
+        assert "httponly" in first_list.headers["set-cookie"].lower()
+        assert "samesite=lax" in first_list.headers["set-cookie"].lower()
+        assert first_list.json() == second_list.json() == []
+
+        created = first_browser.post("/api/chats", json={})
+        chat_id = created.json()["id"]
+        assert [chat["id"] for chat in first_browser.get("/api/chats").json()] == [chat_id]
+        assert second_browser.get("/api/chats").json() == []
+        assert first_browser.get(f"/api/chats/{chat_id}").status_code == 200
+
+        assert second_browser.get(f"/api/chats/{chat_id}").status_code == 404
+        assert second_browser.get(f"/api/chats/{chat_id}/context").status_code == 404
+        assert second_browser.put(f"/api/chats/{chat_id}/context", json=context).status_code == 404
+        assert second_browser.post(
+            f"/api/chats/{chat_id}/context/files",
+            files={"files": ("data.csv", b"id\n1\n", "text/csv")},
+        ).status_code == 404
+        assert second_browser.post(
+            f"/api/chats/{chat_id}/suggestions", json={"code": "df", "cursor": 2}
+        ).status_code == 404
+        assert second_browser.post(
+            f"/api/chats/{chat_id}/messages", data={"prompt": "hello"}
+        ).status_code == 404
+
+
+def test_legacy_chats_are_hidden_but_retained(tmp_path, monkeypatch):
+    database_path = tmp_path / "chats.db"
+    monkeypatch.setattr(database, "DATABASE_PATH", database_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE chats (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO chats VALUES (?, ?, ?, ?)",
+            ("legacy-chat", "Old shared chat", "2025-01-01", "2025-01-01"),
+        )
+
+    with TestClient(app) as client:
+        assert client.get("/api/chats").json() == []
+        assert client.get("/api/chats/legacy-chat").status_code == 404
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT id, owner_id FROM chats").fetchone() == ("legacy-chat", None)
 
 
 def test_context_files_are_persisted(tmp_path, monkeypatch):

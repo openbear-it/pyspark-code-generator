@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import re
+import secrets
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -11,6 +13,8 @@ from app.database import initialize_database, is_database_available
 from app.metrics import collect_request_metrics
 
 ROOT_DIR = Path(__file__).resolve().parent
+SESSION_COOKIE_NAME = "pyspark_browser_session"
+SESSION_COOKIE_MAX_AGE = 31_536_000
 
 
 @asynccontextmanager
@@ -37,6 +41,29 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.middleware("http")(collect_request_metrics)
+
+
+@app.middleware("http")
+async def browser_session(request: Request, call_next):
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    new_session = not session_id or re.fullmatch(r"[A-Za-z0-9_-]{43}", session_id) is None
+    if new_session:
+        session_id = secrets.token_urlsafe(32)
+    request.state.browser_session_id = session_id
+    response = await call_next(request)
+    if new_session:
+        response.set_cookie(
+            SESSION_COOKIE_NAME,
+            session_id,
+            max_age=SESSION_COOKIE_MAX_AGE,
+            path="/",
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="lax",
+        )
+    return response
+
+
 app.mount("/static", StaticFiles(directory=ROOT_DIR / "static"), name="static")
 app.include_router(chat_router)
 

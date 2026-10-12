@@ -29,7 +29,8 @@ def initialize_database() -> None:
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                owner_id TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -52,6 +53,9 @@ def initialize_database() -> None:
             );
             """
         )
+        chat_columns = {row["name"] for row in database.execute("PRAGMA table_info(chats)")}
+        if "owner_id" not in chat_columns:
+            database.execute("ALTER TABLE chats ADD COLUMN owner_id TEXT")
         context_columns = {row["name"] for row in database.execute("PRAGMA table_info(chat_contexts)")}
         if "selected_code" not in context_columns:
             database.execute("ALTER TABLE chat_contexts ADD COLUMN selected_code TEXT NOT NULL DEFAULT ''")
@@ -68,24 +72,33 @@ def is_database_available() -> bool:
     return True
 
 
-def list_chats() -> list[Chat]:
+def list_chats(owner_id: str) -> list[Chat]:
     with connection() as database:
-        rows = database.execute("SELECT * FROM chats ORDER BY updated_at DESC").fetchall()
+        rows = database.execute(
+            "SELECT id, title, created_at, updated_at FROM chats WHERE owner_id = ? ORDER BY updated_at DESC",
+            (owner_id,),
+        ).fetchall()
     return [Chat(**dict(row)) for row in rows]
 
 
-def create_chat(title: str | None) -> Chat:
+def create_chat(title: str | None, owner_id: str) -> Chat:
     timestamp = current_time()
     chat = Chat(id=str(uuid4()), title=title or "New PySpark chat", created_at=timestamp, updated_at=timestamp)
     with connection() as database:
-        database.execute("INSERT INTO chats VALUES (?, ?, ?, ?)", tuple(chat.model_dump().values()))
+        database.execute(
+            "INSERT INTO chats (id, title, created_at, updated_at, owner_id) VALUES (?, ?, ?, ?, ?)",
+            (chat.id, chat.title, chat.created_at, chat.updated_at, owner_id),
+        )
         database.execute("INSERT INTO chat_contexts (chat_id) VALUES (?)", (chat.id,))
     return chat
 
 
-def get_chat(chat_id: str) -> ChatDetail:
+def get_chat(chat_id: str, owner_id: str) -> ChatDetail:
     with connection() as database:
-        chat = database.execute("SELECT * FROM chats WHERE id = ?", (chat_id,)).fetchone()
+        chat = database.execute(
+            "SELECT id, title, created_at, updated_at FROM chats WHERE id = ? AND owner_id = ?",
+            (chat_id, owner_id),
+        ).fetchone()
         if chat is None:
             raise HTTPException(status_code=404, detail="Chat not found")
         rows = database.execute(
@@ -115,8 +128,8 @@ def get_chat(chat_id: str) -> ChatDetail:
     )
 
 
-def update_chat_context(chat_id: str, context: ChatContext) -> ChatContext:
-    get_chat(chat_id)
+def update_chat_context(chat_id: str, owner_id: str, context: ChatContext) -> ChatContext:
+    get_chat(chat_id, owner_id)
     with connection() as database:
         database.execute(
             """
@@ -143,7 +156,7 @@ def update_chat_context(chat_id: str, context: ChatContext) -> ChatContext:
     return context
 
 
-def save_message(chat_id: str, role: str, content: str, attachments: list[str]) -> Message:
+def save_message(chat_id: str, owner_id: str, role: str, content: str, attachments: list[str]) -> Message:
     message = Message(
         id=str(uuid4()),
         role=role,
@@ -152,6 +165,11 @@ def save_message(chat_id: str, role: str, content: str, attachments: list[str]) 
         created_at=current_time(),
     )
     with connection() as database:
+        owned_chat = database.execute(
+            "SELECT 1 FROM chats WHERE id = ? AND owner_id = ?", (chat_id, owner_id)
+        ).fetchone()
+        if owned_chat is None:
+            raise HTTPException(status_code=404, detail="Chat not found")
         database.execute(
             "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)",
             (message.id, chat_id, role, content, json.dumps(attachments), message.created_at),

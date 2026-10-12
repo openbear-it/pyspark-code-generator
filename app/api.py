@@ -1,6 +1,6 @@
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.config import MAX_FILE_SIZE
@@ -12,29 +12,36 @@ from app.source_analysis import analyze_source
 router = APIRouter(prefix="/api", tags=["chats"])
 
 
+def get_browser_session_id(request: Request) -> str:
+    return request.state.browser_session_id
+
+
+BrowserSessionId = Annotated[str, Depends(get_browser_session_id)]
+
+
 @router.get("/chats", response_model=list[Chat], summary="List chat sessions")
-async def read_chats() -> list[Chat]:
-    return list_chats()
+async def read_chats(browser_session_id: BrowserSessionId) -> list[Chat]:
+    return list_chats(browser_session_id)
 
 
 @router.post("/chats", response_model=Chat, status_code=201, summary="Create a chat session")
-async def add_chat(payload: ChatCreate) -> Chat:
-    return create_chat(payload.title)
+async def add_chat(payload: ChatCreate, browser_session_id: BrowserSessionId) -> Chat:
+    return create_chat(payload.title, browser_session_id)
 
 
 @router.get("/chats/{chat_id}", response_model=ChatDetail, summary="Retrieve a chat session")
-async def read_chat(chat_id: str) -> ChatDetail:
-    return get_chat(chat_id)
+async def read_chat(chat_id: str, browser_session_id: BrowserSessionId) -> ChatDetail:
+    return get_chat(chat_id, browser_session_id)
 
 
 @router.get("/chats/{chat_id}/context", response_model=ChatContext, summary="Retrieve persistent chat context")
-async def read_chat_context(chat_id: str) -> ChatContext:
-    return get_chat(chat_id).context
+async def read_chat_context(chat_id: str, browser_session_id: BrowserSessionId) -> ChatContext:
+    return get_chat(chat_id, browser_session_id).context
 
 
 @router.put("/chats/{chat_id}/context", response_model=ChatContext, summary="Replace persistent chat context")
-async def replace_chat_context(chat_id: str, context: ChatContext) -> ChatContext:
-    return update_chat_context(chat_id, context)
+async def replace_chat_context(chat_id: str, context: ChatContext, browser_session_id: BrowserSessionId) -> ChatContext:
+    return update_chat_context(chat_id, browser_session_id, context)
 
 
 @router.post(
@@ -46,8 +53,9 @@ async def replace_chat_context(chat_id: str, context: ChatContext) -> ChatContex
 async def add_context_files(
     chat_id: str,
     files: Annotated[list[UploadFile], File(description="One or more UTF-8 text files to persist as context")],
+    browser_session_id: BrowserSessionId,
 ) -> ChatContext:
-    chat = get_chat(chat_id)
+    chat = get_chat(chat_id, browser_session_id)
     context_files = {file.name: file for file in chat.context.files}
     for upload in files:
         content = await upload.read(MAX_FILE_SIZE + 1)
@@ -58,7 +66,9 @@ async def add_context_files(
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         context_files[source.name] = source
-    return update_chat_context(chat_id, chat.context.model_copy(update={"files": list(context_files.values())}))
+    return update_chat_context(
+        chat_id, browser_session_id, chat.context.model_copy(update={"files": list(context_files.values())})
+    )
 
 
 @router.post(
@@ -67,8 +77,10 @@ async def add_context_files(
     summary="Get an inline LLM code suggestion",
     description="Returns a short code-only completion for the cursor position. The editor calls this endpoint after a pause in typing.",
 )
-async def suggest_code(chat_id: str, payload: CodeSuggestionRequest) -> CodeSuggestion:
-    context = get_chat(chat_id).context
+async def suggest_code(
+    chat_id: str, payload: CodeSuggestionRequest, browser_session_id: BrowserSessionId
+) -> CodeSuggestion:
+    context = get_chat(chat_id, browser_session_id).context
     return CodeSuggestion(code=await request_code_suggestion(context, payload.code, payload.cursor))
 
 
@@ -85,11 +97,12 @@ async def suggest_code(chat_id: str, payload: CodeSuggestionRequest) -> CodeSugg
 )
 async def add_message(
     chat_id: str,
+    browser_session_id: BrowserSessionId,
     prompt: Annotated[str, Form(min_length=1)],
     operation: Annotated[Operation, Form()] = "generate",
     files: Annotated[Optional[list[UploadFile]], File()] = None,
 ) -> Message:
-    get_chat(chat_id)
+    get_chat(chat_id, browser_session_id)
     attachment_names: list[str] = []
     file_context: list[str] = []
     for upload in files or []:
@@ -103,8 +116,8 @@ async def add_message(
         attachment_names.append(source.name)
         file_context.append(f"\n\n--- File: {source.name} ---\n{source.analysis}\n{source.content}")
 
-    save_message(chat_id, "user", prompt, attachment_names)
-    chat = get_chat(chat_id)
+    save_message(chat_id, browser_session_id, "user", prompt, attachment_names)
+    chat = get_chat(chat_id, browser_session_id)
     if file_context:
         llm_message = chat.messages[-1].model_copy(update={"content": prompt + "".join(file_context)})
         chat = chat.model_copy(update={"messages": [*chat.messages[:-1], llm_message]})
@@ -114,6 +127,6 @@ async def add_message(
         async for chunk in stream_completion(chat, operation):
             chunks.append(chunk)
             yield chunk
-        save_message(chat_id, "assistant", "".join(chunks), [])
+        save_message(chat_id, browser_session_id, "assistant", "".join(chunks), [])
 
     return StreamingResponse(generate_response(), media_type="text/plain")
