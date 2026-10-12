@@ -47,7 +47,7 @@ async def request_completion(chat: ChatDetail, operation: Operation) -> str:
     payload = {"model": config.LLM_MODEL, "messages": messages, "temperature": 0.2}
     started_at = perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with httpx.AsyncClient(timeout=90, verify=config.LLM_VERIFY_SSL) as client:
             response = await client.post(endpoint, headers={"Authorization": f"Bearer {config.LLM_API_KEY}"}, json=payload)
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]

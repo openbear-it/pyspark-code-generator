@@ -11,3 +11,4 @@ MAX_FILE_SIZE = 2 * 1024 * 1024
 LLM_BASE_URL = os.getenv("LLM_BASE_URL")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL")
+LLM_VERIFY_SSL = os.getenv("LLM_VERIFY_SSL", "false").lower() in {"1", "true", "yes", "on"}
