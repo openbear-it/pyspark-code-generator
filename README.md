@@ -10,7 +10,7 @@ Create a local configuration file and set the values provided by your LLM vendor
 cp .env.example .env
 ```
 
-Edit `.env` and set `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. `LLM_BASE_URL` must include an optional `/v1` prefix; the service calls `/chat/completions`. The service leaves the output-token limit to the provider. If a response reaches the provider's limit, the service continues it up to `LLM_MAX_CONTINUATIONS` times (default `2`). `LLM_VERIFY_SSL` defaults to `false` to support self-signed LLM certificates; set it to `true` to verify the endpoint certificate. `.env` is automatically loaded for local execution and is excluded from the Docker build context.
+Edit `.env` and set `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. `LLM_BASE_URL` must include an optional `/v1` prefix; the service calls `/chat/completions`. The service leaves the output-token limit to the provider. It continues responses that hit the provider's limit or end with an unclosed Markdown code block, up to `LLM_MAX_CONTINUATIONS` times (default `2`). `LLM_VERIFY_SSL` defaults to `false` to support self-signed LLM certificates; set it to `true` to verify the endpoint certificate. `.env` is automatically loaded for local execution and is excluded from the Docker build context.
 
 ## Run locally
 

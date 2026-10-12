@@ -179,6 +179,53 @@ def test_stream_completion_continues_after_output_limit(monkeypatch):
     assert "Continue exactly" in continuation_messages[-1]["content"]
 
 
+def test_stream_completion_continues_when_code_fence_is_open(monkeypatch):
+    captured_payloads = []
+    segments = [
+        ("```python\nfrom pyspark.sql import functions as F\nschema = StructType([", "stop"),
+        ("StructField('id', IntegerType(), True),\n])\n```\n", "stop"),
+    ]
+
+    async def handler(request):
+        captured_payloads.append(json.loads(request.content))
+        content, finish_reason = segments[len(captured_payloads) - 1]
+        events = [
+            {"choices": [{"delta": {"content": content}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": finish_reason}]},
+        ]
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        body += "data: [DONE]\n\n"
+        return llm.httpx.Response(200, content=body.encode())
+
+    original_async_client = llm.httpx.AsyncClient
+    monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
+    monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(llm.config, "LLM_MAX_CONTINUATIONS", 2)
+    monkeypatch.setattr(
+        llm.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_async_client(transport=llm.httpx.MockTransport(handler), **kwargs),
+    )
+    chat = ChatDetail(
+        id="chat-id",
+        title="Test",
+        created_at="now",
+        updated_at="now",
+        messages=[],
+        context=ChatContext(),
+    )
+
+    async def collect_stream():
+        return "".join([chunk async for chunk in llm.stream_completion(chat, "generate")])
+
+    response = asyncio.run(collect_stream())
+
+    assert response == "".join(segment[0] for segment in segments)
+    assert len(captured_payloads) == 2
+    assert "Continue exactly" in captured_payloads[1]["messages"][-1]["content"]
+
+
 def test_stream_completion_stops_after_max_continuations(monkeypatch):
     request_count = 0
 

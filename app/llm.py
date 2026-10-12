@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import AsyncIterator
 from time import perf_counter
 
@@ -51,6 +52,20 @@ def context_prompt(context: ChatContext) -> str:
     if context.relevant_code:
         parts.append(f"Relevant code:\n```\n{context.relevant_code}\n```")
     return "\n\n".join(parts)
+
+
+def has_unclosed_markdown_fence(content: str) -> bool:
+    open_fence: str | None = None
+    for line in content.splitlines():
+        match = re.match(r" {0,3}(`{3,}|~{3,})", line)
+        if not match:
+            continue
+        marker = match.group(1)
+        if open_fence is None:
+            open_fence = marker
+        elif marker[0] == open_fence[0] and len(marker) >= len(open_fence) and not line[match.end():].strip():
+            open_fence = None
+    return open_fence is not None
 
 
 async def request_completion(chat: ChatDetail, operation: Operation) -> str:
@@ -125,6 +140,7 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
     started_at = perf_counter()
     continuation_count = 0
     max_continuations = max(0, config.LLM_MAX_CONTINUATIONS)
+    response_chunks: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=90, verify=config.LLM_VERIFY_SSL) as client:
             while True:
@@ -152,13 +168,17 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
                         content = choice.get("delta", {}).get("content")
                         if content:
                             continuation_chunks.append(content)
+                            response_chunks.append(content)
                             yield content
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:
                             stream_finished = True
                 if not stream_finished:
                     raise HTTPException(status_code=502, detail="LLM stream ended before completion")
-                if finish_reason != "length":
+                should_continue = finish_reason == "length" or (
+                    finish_reason == "stop" and has_unclosed_markdown_fence("".join(response_chunks))
+                )
+                if not should_continue:
                     break
                 if continuation_count >= max_continuations:
                     LLM_REQUESTS.labels(operation, "error").inc()
