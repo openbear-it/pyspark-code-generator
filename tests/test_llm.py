@@ -36,7 +36,6 @@ def test_request_completion_disables_ssl_verification(monkeypatch):
     monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example/v1")
     monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
     monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
-    monkeypatch.setattr(llm.config, "LLM_MAX_OUTPUT_TOKENS", 6144, raising=False)
     monkeypatch.setattr(llm.config, "LLM_VERIFY_SSL", False)
     monkeypatch.setattr(llm.httpx, "AsyncClient", AsyncClient)
 
@@ -51,10 +50,10 @@ def test_request_completion_disables_ssl_verification(monkeypatch):
 
     assert asyncio.run(llm.request_completion(chat, "generate")) == "Generated code"
     assert captured_client_options == {"timeout": 90, "verify": False}
-    assert captured_payload["max_tokens"] == 6144
+    assert "max_tokens" not in captured_payload
 
 
-def test_stream_completion_uses_configured_output_token_budget(monkeypatch):
+def test_stream_completion_omits_output_token_budget(monkeypatch):
     captured_payload = {}
 
     async def handler(request):
@@ -67,7 +66,6 @@ def test_stream_completion_uses_configured_output_token_budget(monkeypatch):
     monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
     monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
     monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
-    monkeypatch.setattr(llm.config, "LLM_MAX_OUTPUT_TOKENS", 6144)
     monkeypatch.setattr(
         llm.httpx,
         "AsyncClient",
@@ -86,8 +84,52 @@ def test_stream_completion_uses_configured_output_token_budget(monkeypatch):
         return [chunk async for chunk in llm.stream_completion(chat, "generate")]
 
     assert asyncio.run(collect_stream()) == ["Done"]
-    assert captured_payload["max_tokens"] == 6144
+    assert "max_tokens" not in captured_payload
     assert captured_payload["stream"] is True
+
+
+def test_stream_completion_consumes_done_after_finish_reason(monkeypatch):
+    stream_state = {"done_seen": False}
+
+    class EventStream(llm.httpx.AsyncByteStream):
+        async def __aiter__(self):
+            events = [
+                {"choices": [{"delta": {"content": "Done"}, "finish_reason": "stop"}]},
+                {"choices": [], "usage": {"completion_tokens": 1}},
+                "[DONE]",
+            ]
+            for event in events:
+                data = event if isinstance(event, str) else json.dumps(event)
+                if event == "[DONE]":
+                    stream_state["done_seen"] = True
+                yield f"data: {data}\n\n".encode()
+
+    async def handler(request):
+        return llm.httpx.Response(200, stream=EventStream())
+
+    original_async_client = llm.httpx.AsyncClient
+    monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
+    monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(
+        llm.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_async_client(transport=llm.httpx.MockTransport(handler), **kwargs),
+    )
+    chat = ChatDetail(
+        id="chat-id",
+        title="Test",
+        created_at="now",
+        updated_at="now",
+        messages=[],
+        context=ChatContext(),
+    )
+
+    async def collect_stream():
+        return [chunk async for chunk in llm.stream_completion(chat, "generate")]
+
+    assert asyncio.run(collect_stream()) == ["Done"]
+    assert stream_state["done_seen"]
 
 
 def test_stream_completion_continues_after_output_limit(monkeypatch):
@@ -110,7 +152,6 @@ def test_stream_completion_continues_after_output_limit(monkeypatch):
     monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
     monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
     monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
-    monkeypatch.setattr(llm.config, "LLM_MAX_OUTPUT_TOKENS", 6144)
     monkeypatch.setattr(llm.config, "LLM_MAX_CONTINUATIONS", 2, raising=False)
     monkeypatch.setattr(
         llm.httpx,
@@ -131,6 +172,7 @@ def test_stream_completion_continues_after_output_limit(monkeypatch):
 
     assert asyncio.run(collect_stream()) == "first part second part"
     assert len(captured_payloads) == 2
+    assert all("max_tokens" not in payload for payload in captured_payloads)
     continuation_messages = captured_payloads[1]["messages"]
     assert continuation_messages[-2] == {"role": "assistant", "content": "first part"}
     assert continuation_messages[-1]["role"] == "user"
@@ -155,7 +197,6 @@ def test_stream_completion_stops_after_max_continuations(monkeypatch):
     monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
     monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
     monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
-    monkeypatch.setattr(llm.config, "LLM_MAX_OUTPUT_TOKENS", 6144)
     monkeypatch.setattr(llm.config, "LLM_MAX_CONTINUATIONS", 1)
     monkeypatch.setattr(
         llm.httpx,

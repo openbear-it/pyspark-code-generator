@@ -63,7 +63,6 @@ async def request_completion(chat: ChatDetail, operation: Operation) -> str:
         "model": config.LLM_MODEL,
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": config.LLM_MAX_OUTPUT_TOKENS,
     }
     started_at = perf_counter()
     try:
@@ -121,7 +120,6 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
         "model": config.LLM_MODEL,
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": config.LLM_MAX_OUTPUT_TOKENS,
         "stream": True,
     }
     started_at = perf_counter()
@@ -147,7 +145,10 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
                         if event == "[DONE]":
                             stream_finished = True
                             break
-                        choice = json.loads(event)["choices"][0]
+                        choices = json.loads(event).get("choices", [])
+                        if not choices:
+                            continue
+                        choice = choices[0]
                         content = choice.get("delta", {}).get("content")
                         if content:
                             continuation_chunks.append(content)
@@ -155,7 +156,6 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:
                             stream_finished = True
-                            break
                 if not stream_finished:
                     raise HTTPException(status_code=502, detail="LLM stream ended before completion")
                 if finish_reason != "length":
