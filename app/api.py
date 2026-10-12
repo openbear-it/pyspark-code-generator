@@ -1,4 +1,6 @@
+import logging
 from typing import Annotated, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -10,6 +12,8 @@ from app.schemas import Chat, ChatContext, ChatCreate, ChatDetail, CodeSuggestio
 from app.source_analysis import analyze_source
 
 router = APIRouter(prefix="/api", tags=["chats"])
+logger = logging.getLogger(__name__)
+STREAM_ERROR_PREFIX = "\x1ePYSPARK_STREAM_ERROR:"
 
 
 def get_browser_session_id(request: Request) -> str:
@@ -124,9 +128,19 @@ async def add_message(
 
     async def generate_response():
         chunks: list[str] = []
-        async for chunk in stream_completion(chat, operation):
-            chunks.append(chunk)
-            yield chunk
+        try:
+            async for chunk in stream_completion(chat, operation):
+                chunks.append(chunk)
+                yield chunk
+        except HTTPException as error:
+            logger.warning("LLM stream failed: %s", error.detail)
+            yield f"{STREAM_ERROR_PREFIX}{quote(str(error.detail), safe='')}\n"
+            return
+        except Exception as error:
+            logger.exception("Unexpected LLM stream failure")
+            detail = f"Unexpected stream failure ({type(error).__name__})"
+            yield f"{STREAM_ERROR_PREFIX}{quote(detail, safe='')}\n"
+            return
         save_message(chat_id, browser_session_id, "assistant", "".join(chunks), [])
 
     return StreamingResponse(generate_response(), media_type="text/plain")

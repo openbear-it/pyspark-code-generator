@@ -176,6 +176,25 @@ def test_chat_response_is_streamed_and_persisted(tmp_path, monkeypatch):
         assert messages[0]["attachments"] == ["customers.csv"]
 
 
+def test_stream_api_reports_upstream_error_after_partial_output(tmp_path, monkeypatch):
+    async def interrupted_stream(chat, operation):
+        yield "Risposta parziale"
+        raise HTTPException(status_code=502, detail="LLM response was truncated at its output length limit")
+
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "chats.db")
+    monkeypatch.setattr(api, "stream_completion", interrupted_stream)
+    with TestClient(app) as client:
+        chat_id = client.post("/api/chats", json={}).json()["id"]
+        response = client.post(
+            f"/api/chats/{chat_id}/messages",
+            data={"prompt": "Genera una risposta lunga"},
+        )
+
+    assert response.status_code == 200
+    assert response.text.startswith("Risposta parziale\x1ePYSPARK_STREAM_ERROR:")
+    assert "truncated%20at%20its%20output%20length%20limit" in response.text
+
+
 @pytest.mark.parametrize("finish_reason", [None, "stop", "length"])
 def test_llm_stream_requires_completion_signal(monkeypatch, finish_reason):
     original_async_client = httpx.AsyncClient

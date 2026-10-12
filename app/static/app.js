@@ -107,13 +107,38 @@ async function streamResponse(path, body, onStart, onChunk) {
   await onStart();
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const errorPrefix = "\x1ePYSPARK_STREAM_ERROR:";
+  let buffered = "";
+  let streamError = "";
+  const consume = (text, final = false) => {
+    buffered += text;
+    const markerIndex = buffered.indexOf(errorPrefix);
+    if (markerIndex >= 0) {
+      if (markerIndex) onChunk(buffered.slice(0, markerIndex));
+      const detailStart = markerIndex + errorPrefix.length;
+      const lineEnd = buffered.indexOf("\n", detailStart);
+      if (lineEnd < 0 && !final) { buffered = buffered.slice(markerIndex); return; }
+      const detailEnd = lineEnd < 0 ? buffered.length : lineEnd;
+      try { streamError = decodeURIComponent(buffered.slice(detailStart, detailEnd)); }
+      catch { streamError = "Lo stream LLM è terminato con un errore."; }
+      buffered = lineEnd < 0 ? "" : buffered.slice(lineEnd + 1);
+      if (buffered) onChunk(buffered);
+      buffered = "";
+      return;
+    }
+    const safeLength = final ? buffered.length : Math.max(0, buffered.length - errorPrefix.length + 1);
+    if (safeLength) {
+      onChunk(buffered.slice(0, safeLength));
+      buffered = buffered.slice(safeLength);
+    }
+  };
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    onChunk(decoder.decode(value, { stream: true }));
+    consume(decoder.decode(value, { stream: true }));
   }
-  const remaining = decoder.decode();
-  if (remaining) onChunk(remaining);
+  consume(decoder.decode(), true);
+  if (streamError) throw new Error(streamError);
 }
 
 function renderMessages(chat) {
