@@ -25,3 +25,17 @@
 @media (max-width: 620px) { .editor-pane { grid-template-rows: 43px 31px auto 330px 47px; }.editor-wrap { min-height: 0; }.editor-wrap textarea { height: 100%; min-height: 0; overflow: auto; } }
 .brand { color: var(--text); }
 .spark-mark { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; border-radius: 6px; color: var(--app); background: var(--teal); }
+.editor-wrap textarea { white-space: pre; overflow-wrap: normal; }
+.editor-wrap pre { padding-bottom: calc(16px + 1.65em); }
+.message-warning { margin: 10px 0 0; padding: 7px 9px; border-left: 2px solid var(--amber); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.editor-wrap { position: relative; }
+.inline-suggestion { position: absolute; z-index: 3; display: grid; gap: 5px; max-width: min(420px, calc(100% - 58px)); max-height: calc(100% - 8px); padding: 7px; border: 1px solid #9bc8ba; border-radius: 4px; color: #31584d; background: #f5faf7; box-shadow: 0 5px 16px #17302a26; }
+.inline-suggestion[hidden] { display: none; }
+.inline-suggestion-code { max-height: 150px; overflow: auto; color: #52776b; font: 12px/1.5 "DM Mono", monospace; white-space: pre; }
+.inline-suggestion-actions { display: flex; justify-content: flex-end; gap: 3px; }
+.inline-suggestion-actions .icon-button { width: 26px; height: 26px; color: #17645f; background: #e4f3ed; }
+.markdown-content .code-block { position: relative; margin: 0 0 1em; }
+.markdown-content .code-block pre { margin: 0; padding-top: 42px; }
+.copy-code-button { position: absolute; z-index: 1; top: 7px; right: 7px; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--panel); }
+.copy-code-button:hover, .copy-code-button[data-copied="true"] { color: #17645f; border-color: #9bc8ba; background: #e4f3ed; }
+.copy-code-button svg { width: 15px; height: 15px; }

@@ -1,4 +1,4 @@
-const state = { chatId: null, context: null, selection: "" };
+const state = { chatId: null, context: null, selection: "", suggestionPending: false };
 const chatList = document.querySelector("#chat-list");
 const messages = document.querySelector("#messages");
 const chatTitle = document.querySelector("#chat-title");
@@ -10,6 +10,10 @@ const contextFilesList = document.querySelector("#context-files-list");
 const sourceAnalysis = document.querySelector("#source-analysis");
 const codeEditor = document.querySelector("#code-editor");
 const lineNumbers = document.querySelector("#line-numbers");
+const inlineSuggestion = document.querySelector("#inline-suggestion");
+const inlineSuggestionCode = document.querySelector("#inline-suggestion-code");
+const acceptSuggestionButton = document.querySelector("#accept-suggestion");
+const dismissSuggestionButton = document.querySelector("#dismiss-suggestion");
 const selectionStatus = document.querySelector("#selection-status");
 const selectionButton = document.querySelector("#use-selection");
 const contextChip = document.querySelector("#context-chip");
@@ -22,6 +26,73 @@ const renderMarkdown = (text) => window.marked && window.DOMPurify
   : escapeHtml(text).replace(/\n/g, "<br>");
 const renderMessageContent = (message) => message.role === "assistant" ? renderMarkdown(message.content) : escapeHtml(message.content);
 const renderIcons = () => window.lucide?.createIcons();
+
+function decorateCodeBlocks(container) {
+  container.querySelectorAll("pre > code").forEach((code) => {
+    const pre = code.parentElement;
+    let frame = pre.parentElement;
+    if (!frame.classList.contains("code-block")) {
+      frame = document.createElement("div");
+      frame.className = "code-block";
+      pre.before(frame);
+      frame.append(pre);
+    }
+    if (window.hljs) {
+      const languageClass = [...code.classList].find((className) => className.startsWith("language-"));
+      const language = languageClass?.slice("language-".length);
+      const highlighted = language && window.hljs.getLanguage(language)
+        ? window.hljs.highlight(code.textContent, { language })
+        : window.hljs.highlightAuto(code.textContent);
+      code.innerHTML = highlighted.value;
+      code.classList.add("hljs");
+    }
+    if (frame.querySelector(".copy-code-button")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-code-button";
+    button.title = "Copia codice";
+    button.setAttribute("aria-label", "Copia codice");
+    button.innerHTML = '<i data-lucide="copy"></i>';
+    frame.append(button);
+  });
+  renderIcons();
+}
+
+async function copyCode(button) {
+  const code = button.closest(".code-block")?.querySelector("pre > code")?.textContent;
+  if (code === undefined) return;
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code);
+    else throw new Error("Clipboard API unavailable");
+  } catch {
+    const fallback = document.createElement("textarea");
+    fallback.value = code;
+    fallback.setAttribute("readonly", "");
+    fallback.style.position = "fixed";
+    fallback.style.opacity = "0";
+    document.body.append(fallback);
+    fallback.select();
+    const copied = document.execCommand("copy");
+    fallback.remove();
+    if (!copied) {
+      button.title = "Copia non riuscita";
+      return;
+    }
+  }
+  button.dataset.copied = "true";
+  button.title = "Codice copiato";
+  button.setAttribute("aria-label", "Codice copiato");
+  button.innerHTML = '<i data-lucide="check"></i>';
+  renderIcons();
+  window.setTimeout(() => {
+    if (!button.isConnected) return;
+    delete button.dataset.copied;
+    button.title = "Copia codice";
+    button.setAttribute("aria-label", "Copia codice");
+    button.innerHTML = '<i data-lucide="copy"></i>';
+    renderIcons();
+  }, 1400);
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -53,6 +124,7 @@ function renderMessages(chat) {
       ${message.attachments.map((name) => `<span class="attachment">${escapeHtml(name)}</span>`).join("")}
       <div class="message-content ${message.role === "assistant" ? "markdown-content" : ""}">${renderMessageContent(message)}</div>
     </article>`).join("") : `<div class="empty-state"><i data-lucide="messages-square"></i><h2>Inizia dal codice</h2><p>Seleziona una parte dell'editor per usarla come contesto, poi poni una domanda.</p></div>`;
+  messages.querySelectorAll(".markdown-content").forEach(decorateCodeBlocks);
   messages.scrollTop = messages.scrollHeight;
   renderIcons();
 }
@@ -65,6 +137,60 @@ function addStreamingMessage() {
 function renderLineNumbers() {
   const lines = Math.max(1, codeEditor.value.split("\n").length);
   lineNumbers.textContent = Array.from({ length: lines }, (_, index) => index + 1).join("\n");
+}
+
+function dismissInlineSuggestion() {
+  state.inlineSuggestion = null;
+  inlineSuggestion.hidden = true;
+  inlineSuggestionCode.textContent = "";
+}
+
+function positionInlineSuggestion() {
+  const suggestion = state.inlineSuggestion;
+  if (!suggestion) return;
+  const styles = getComputedStyle(codeEditor);
+  const prefix = suggestion.source.slice(0, suggestion.selectionStart);
+  const lineStart = prefix.lastIndexOf("\n") + 1;
+  const lineText = prefix.slice(lineStart);
+  const tabSize = Number.parseInt(styles.tabSize, 10) || 2;
+  let column = 0;
+  let expandedLine = "";
+  for (const character of lineText) {
+    if (character === "\t") {
+      const spaces = tabSize - (column % tabSize);
+      expandedLine += " ".repeat(spaces);
+      column += spaces;
+    } else {
+      expandedLine += character;
+      column += 1;
+    }
+  }
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  context.font = styles.font;
+  const textOffset = context.measureText(expandedLine).width;
+  const lineNumber = (prefix.match(/\n/g) || []).length;
+  const lineHeight = Number.parseFloat(styles.lineHeight);
+  const editorRect = codeEditor.getBoundingClientRect();
+  const wrapRect = codeEditor.parentElement.getBoundingClientRect();
+  const left = editorRect.left - wrapRect.left + Number.parseFloat(styles.borderLeftWidth)
+    + Number.parseFloat(styles.paddingLeft) + textOffset - codeEditor.scrollLeft;
+  const top = editorRect.top - wrapRect.top + Number.parseFloat(styles.borderTopWidth)
+    + Number.parseFloat(styles.paddingTop) + lineNumber * lineHeight - codeEditor.scrollTop;
+  inlineSuggestion.hidden = false;
+  inlineSuggestionCode.textContent = suggestion.code;
+  inlineSuggestion.style.left = `${Math.max(46, Math.min(left, wrapRect.width - inlineSuggestion.offsetWidth - 8))}px`;
+  inlineSuggestion.style.top = `${Math.max(4, Math.min(top, wrapRect.height - inlineSuggestion.offsetHeight - 4))}px`;
+  renderIcons();
+}
+
+function acceptInlineSuggestion() {
+  const suggestion = state.inlineSuggestion;
+  if (!suggestion) return;
+  dismissInlineSuggestion();
+  codeEditor.focus();
+  codeEditor.setRangeText(suggestion.code, suggestion.selectionStart, suggestion.selectionEnd, "end");
+  codeEditor.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function updateCaret() {
@@ -80,6 +206,11 @@ function selectionSummary(text) {
 }
 
 function updateSelection() {
+  const suggestion = state.inlineSuggestion;
+  if (suggestion && (state.chatId !== suggestion.chatId || codeEditor.value !== suggestion.source
+    || codeEditor.selectionStart !== suggestion.selectionStart || codeEditor.selectionEnd !== suggestion.selectionEnd)) {
+    dismissInlineSuggestion();
+  }
   state.selection = codeEditor.value.slice(codeEditor.selectionStart, codeEditor.selectionEnd);
   const hasSelection = Boolean(state.selection.trim());
   selectionButton.disabled = !hasSelection;
@@ -114,6 +245,7 @@ async function persistContext(changes) {
 }
 
 async function loadChat(chatId) {
+  dismissInlineSuggestion();
   state.chatId = chatId;
   const chat = await api(`/api/chats/${chatId}`);
   renderMessages(chat);
@@ -159,6 +291,10 @@ document.querySelector("#clear-context").addEventListener("click", async () => {
   try { await persistContext({ relevant_code: codeEditor.value, selected_code: "" }); }
   catch (error) { alert(error.message); }
 });
+messages.addEventListener("click", async (event) => {
+  const button = event.target.closest(".copy-code-button");
+  if (button) await copyCode(button);
+});
 contextFileInput.addEventListener("change", async () => {
   if (!contextFileInput.files.length || !state.chatId) return;
   const body = new FormData();
@@ -177,47 +313,99 @@ codeEditor.addEventListener("select", updateSelection);
 codeEditor.addEventListener("click", updateSelection);
 codeEditor.addEventListener("keyup", updateSelection);
 codeEditor.addEventListener("keydown", async (event) => {
+  if (state.inlineSuggestion && event.key === "Tab") {
+    event.preventDefault();
+    acceptInlineSuggestion();
+    return;
+  }
+  if (state.inlineSuggestion && event.key === "Escape") {
+    event.preventDefault();
+    dismissInlineSuggestion();
+    updateSelection();
+    return;
+  }
   if (!event.ctrlKey || event.code !== "Space") return;
   event.preventDefault();
-  if (!state.chatId || !codeEditor.value.trim()) return;
-  const cursor = codeEditor.selectionStart;
+  if (state.suggestionPending || !state.chatId || !codeEditor.value.trim()) return;
+  const codeAtRequest = codeEditor.value;
+  const selectionStart = codeEditor.selectionStart;
+  const selectionEnd = codeEditor.selectionEnd;
+  const cursor = [...codeAtRequest.slice(0, selectionStart)].length;
+  const chatId = state.chatId;
+  state.suggestionPending = true;
+  codeEditor.setAttribute("aria-busy", "true");
+  selectionStatus.textContent = "Suggerimento in corso...";
   try {
-    const suggestion = await api(`/api/chats/${state.chatId}/suggestions`, {
+    const suggestion = await api(`/api/chats/${chatId}/suggestions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: codeEditor.value, cursor }),
+      body: JSON.stringify({ code: codeAtRequest, cursor }),
     });
     if (!suggestion.code) return;
-    codeEditor.setRangeText(suggestion.code, cursor, cursor, "end");
-    codeEditor.dispatchEvent(new Event("input", { bubbles: true }));
+    if (state.chatId !== chatId || codeEditor.value !== codeAtRequest || document.activeElement !== codeEditor
+      || codeEditor.selectionStart !== selectionStart || codeEditor.selectionEnd !== selectionEnd) return;
+    state.inlineSuggestion = { chatId, source: codeAtRequest, selectionStart, selectionEnd, code: suggestion.code };
+    positionInlineSuggestion();
   } catch (error) { alert(error.message); }
+  finally {
+    state.suggestionPending = false;
+    codeEditor.removeAttribute("aria-busy");
+    updateSelection();
+    if (state.inlineSuggestion) selectionStatus.textContent = "Suggerimento pronto · Tab accetta · Esc ignora";
+  }
 });
-codeEditor.addEventListener("scroll", () => { lineNumbers.scrollTop = codeEditor.scrollTop; });
+acceptSuggestionButton.addEventListener("mousedown", (event) => event.preventDefault());
+acceptSuggestionButton.addEventListener("click", acceptInlineSuggestion);
+dismissSuggestionButton.addEventListener("mousedown", (event) => event.preventDefault());
+dismissSuggestionButton.addEventListener("click", () => { dismissInlineSuggestion(); updateSelection(); });
+codeEditor.addEventListener("scroll", () => { lineNumbers.scrollTop = codeEditor.scrollTop; positionInlineSuggestion(); });
 files.addEventListener("change", () => { document.querySelector("#file-count").textContent = files.files.length ? `${files.files.length} file` : ""; });
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!state.chatId) await createChat();
   const button = document.querySelector("#send"); button.disabled = true;
+  let answer = "";
+  let streamingContent;
+  let renderFrame = 0;
+  let followStream = true;
+  const renderStream = () => {
+    renderFrame = 0;
+    if (!streamingContent?.isConnected) return;
+    streamingContent.innerHTML = renderMarkdown(answer);
+    if (followStream) messages.scrollTop = messages.scrollHeight;
+  };
   try {
     if (codeEditor.value !== state.context.relevant_code) await persistContext({ relevant_code: codeEditor.value });
     const body = new FormData(); body.append("prompt", document.querySelector("#prompt").value); body.append("operation", document.querySelector("#operation").value);
     [...files.files].forEach((file) => body.append("files", file));
-    let answer = "";
-    let streamingContent;
     await streamResponse(`/api/chats/${state.chatId}/messages`, body, async () => {
       const chat = await api(`/api/chats/${state.chatId}`);
       renderMessages(chat);
       streamingContent = addStreamingMessage();
     }, (chunk) => {
-      const followStream = messages.scrollHeight - messages.clientHeight - messages.scrollTop < 48;
+      followStream = messages.scrollHeight - messages.clientHeight - messages.scrollTop < 48;
       answer += chunk;
-      streamingContent.innerHTML = renderMarkdown(answer);
-      if (followStream) messages.scrollTop = messages.scrollHeight;
+      if (!renderFrame) renderFrame = requestAnimationFrame(renderStream);
     });
+    if (renderFrame) cancelAnimationFrame(renderFrame);
+    renderStream();
+    decorateCodeBlocks(streamingContent);
     streamingContent.closest(".message")?.querySelector(".streaming-dot")?.remove();
     form.reset(); document.querySelector("#file-count").textContent = ""; await refreshChats();
-  } catch (error) { alert(error.message); } finally { button.disabled = false; }
+  } catch (error) {
+    if (renderFrame) cancelAnimationFrame(renderFrame);
+    if (streamingContent?.isConnected) {
+      renderStream();
+      decorateCodeBlocks(streamingContent);
+      const message = streamingContent.closest(".message");
+      message?.querySelector(".streaming-dot")?.remove();
+      const warning = document.createElement("p");
+      warning.className = "message-warning";
+      warning.textContent = `Generazione interrotta; la risposta potrebbe essere incompleta. ${error.message}`;
+      message?.append(warning);
+    } else alert(error.message);
+  } finally { button.disabled = false; }
 });
 
 (async () => { await refreshChats(); const first = chatList.querySelector("button"); if (first) await loadChat(first.dataset.id); else await createChat(); renderIcons(); })().catch((error) => alert(error.message));

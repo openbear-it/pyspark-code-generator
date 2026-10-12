@@ -1,10 +1,17 @@
+import asyncio
+import json
 import sqlite3
 
+import httpx
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import app.api as api
 import app.database as database
+import app.llm as llm
 from app.main import app
+from app.schemas import ChatContext, ChatDetail
 
 
 def test_health_and_chat_lifecycle(tmp_path, monkeypatch):
@@ -167,3 +174,44 @@ def test_chat_response_is_streamed_and_persisted(tmp_path, monkeypatch):
         messages = client.get(f"/api/chats/{chat_id}").json()["messages"]
         assert [message["content"] for message in messages] == ["Rispondi in italiano", "Ciao **mondo**"]
         assert messages[0]["attachments"] == ["customers.csv"]
+
+
+@pytest.mark.parametrize("finish_reason", [None, "stop", "length"])
+def test_llm_stream_requires_completion_signal(monkeypatch, finish_reason):
+    original_async_client = httpx.AsyncClient
+    content = "Risposta parziale, già con accenti: è"
+
+    async def handler(request):
+        event = {"choices": [{"delta": {"content": content}}]}
+        body = f"data: {json.dumps(event)}\n\n"
+        if finish_reason:
+            final_event = {"choices": [{"delta": {}, "finish_reason": finish_reason}]}
+            body += f"data: {json.dumps(final_event)}\n\n"
+        return httpx.Response(200, content=body.encode())
+
+    monkeypatch.setattr(llm.config, "LLM_BASE_URL", "https://llm.example")
+    monkeypatch.setattr(llm.config, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm.config, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(
+        llm.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_async_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    chat = ChatDetail(
+        id="chat",
+        title="Test",
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+        messages=[],
+        context=ChatContext(),
+    )
+
+    async def collect_stream():
+        return [chunk async for chunk in llm.stream_completion(chat, "generate")]
+
+    if finish_reason in {None, "length"}:
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(collect_stream())
+        assert error.value.status_code == 502
+    else:
+        assert asyncio.run(collect_stream()) == [content]

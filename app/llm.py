@@ -114,6 +114,7 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
     endpoint = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
     payload = {"model": config.LLM_MODEL, "messages": messages, "temperature": 0.2, "stream": True}
     started_at = perf_counter()
+    stream_finished = False
     try:
         async with httpx.AsyncClient(timeout=90, verify=config.LLM_VERIFY_SSL) as client:
             async with client.stream("POST", endpoint, headers={"Authorization": f"Bearer {config.LLM_API_KEY}"}, json=payload) as response:
@@ -123,10 +124,20 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
                         continue
                     event = line.removeprefix("data:").strip()
                     if event == "[DONE]":
+                        stream_finished = True
                         break
-                    content = json.loads(event)["choices"][0].get("delta", {}).get("content")
+                    choice = json.loads(event)["choices"][0]
+                    content = choice.get("delta", {}).get("content")
                     if content:
                         yield content
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason is not None:
+                        stream_finished = True
+                        if finish_reason == "length":
+                            LLM_REQUESTS.labels(operation, "error").inc()
+                            raise HTTPException(status_code=502, detail="LLM response was truncated at its output length limit")
+        if not stream_finished:
+            raise HTTPException(status_code=502, detail="LLM stream ended before completion")
         LLM_REQUESTS.labels(operation, "success").inc()
     except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
         LLM_REQUESTS.labels(operation, "error").inc()
