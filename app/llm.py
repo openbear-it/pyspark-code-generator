@@ -59,7 +59,12 @@ async def request_completion(chat: ChatDetail, operation: Operation) -> str:
     messages = [{"role": "system", "content": f"{system_prompt(operation)}\n\n{context_prompt(chat.context)}"}]
     messages.extend({"role": message.role, "content": message.content} for message in chat.messages)
     endpoint = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
-    payload = {"model": config.LLM_MODEL, "messages": messages, "temperature": 0.2}
+    payload = {
+        "model": config.LLM_MODEL,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": config.LLM_MAX_OUTPUT_TOKENS,
+    }
     started_at = perf_counter()
     try:
         async with httpx.AsyncClient(timeout=90, verify=config.LLM_VERIFY_SSL) as client:
@@ -112,7 +117,13 @@ async def stream_completion(chat: ChatDetail, operation: Operation) -> AsyncIter
     messages = [{"role": "system", "content": f"{system_prompt(operation)}\n\n{context_prompt(chat.context)}"}]
     messages.extend({"role": message.role, "content": message.content} for message in chat.messages)
     endpoint = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
-    payload = {"model": config.LLM_MODEL, "messages": messages, "temperature": 0.2, "stream": True}
+    payload = {
+        "model": config.LLM_MODEL,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": config.LLM_MAX_OUTPUT_TOKENS,
+        "stream": True,
+    }
     started_at = perf_counter()
     stream_finished = False
     try:
